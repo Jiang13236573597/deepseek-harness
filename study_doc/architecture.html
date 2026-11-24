@@ -1,0 +1,2157 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>DeepSeek Harness 架构导览</title>
+<style>
+@font-face { font-family: "DshBrand"; src: url("../packages/client/ui-theme/src/styles/montserrat-medium.woff2") format("woff2"); font-weight: 500; font-display: swap; }
+:root {
+  --ds-50: #EDF3FE; --ds-100: #E4EDFD; --ds-200: #D3E2FF; --ds-300: #B7C8FE; --ds-400: #7AAAFF; --ds-450: #5686FE;
+  --ds-500: #4176E6; --ds-600: #4868B2; --ds-800: #34415B; --ds-900: #283142;
+  --ink: #0F1115; --ink-2: #34415B; --muted: #5B6475; --line: #DDE2E8; --paper: #FFFFFF; --bg: #F5F7FB;
+  --teal: #0E8C8C; --violet: #6C55E0; --amber: #C77D14; --coral: #CF4F45; --green: #2E9461;
+  --teal-50: #E3F5F4; --violet-50: #EFEBFF; --amber-50: #FFF4E0; --coral-50: #FDEBEA; --green-50: #E6F5EC;
+  --font: -apple-system, BlinkMacSystemFont, "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "Noto Sans CJK SC", "Segoe UI", Roboto, sans-serif;
+  --mono: "SF Mono", "JetBrains Mono", Menlo, Consolas, "Liberation Mono", monospace;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; height: 100%; overflow: hidden; background: #1B2130; font-family: var(--font); color: var(--ink); }
+a { color: var(--ds-500); }
+#viewport { position: fixed; inset: 0; }
+#stage { position: absolute; left: 50%; top: 50%; width: 1600px; height: 900px; transform-origin: center center; background: var(--bg); overflow: hidden; box-shadow: 0 24px 70px rgba(0, 0, 0, .4); }
+.slide { position: absolute; inset: 0; padding: 50px 72px 58px; display: flex; flex-direction: column; background: var(--bg); opacity: 0; visibility: hidden; transform: translateX(40px); transition: opacity .35s ease, transform .35s ease, visibility 0s linear .35s; }
+.slide.active { opacity: 1; visibility: visible; transform: none; transition: opacity .35s ease, transform .35s ease, visibility 0s; }
+.slide.past { transform: translateX(-40px); }
+.kicker { font-size: 17px; font-weight: 700; letter-spacing: .14em; text-transform: uppercase; color: var(--ds-500); }
+.slide h2 { margin: 6px 0 0; font-size: 44px; line-height: 1.2; font-weight: 800; letter-spacing: -.01em; }
+.lead { margin: 10px 0 0; max-width: 1380px; font-size: 23px; line-height: 1.5; color: var(--muted); }
+.body { flex: 1; min-height: 0; margin-top: 26px; display: grid; gap: 30px; }
+.full { grid-template-columns: 1fr; }
+.cols-2 { grid-template-columns: 1fr 1fr; }
+.cols-3 { grid-template-columns: repeat(3, 1fr); }
+.td { grid-template-columns: .8fr 1.45fr; }
+.dt { grid-template-columns: 1.45fr .8fr; }
+.col { display: flex; flex-direction: column; gap: 18px; min-height: 0; min-width: 0; }
+.diagram { position: relative; min-width: 0; min-height: 0; height: 100%; display: flex; align-items: center; justify-content: center; background: var(--paper); border: 1px solid var(--line); border-radius: 18px; padding: 18px; overflow: hidden; }
+.diagram.bare { background: transparent; border: 0; padding: 0; }
+.diagram svg { display: block; }
+.diagram::before { content: "图表渲染中…"; color: var(--muted); font-size: 18px; }
+.diagram[data-state="done"]::before, .diagram[data-state="error"]::before { content: none; }
+.diagram .err { color: var(--coral); font-size: 17px; padding: 12px; white-space: pre-wrap; }
+ul.points { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 15px; font-size: 22px; line-height: 1.5; }
+ul.points li { position: relative; padding-left: 26px; }
+ul.points li::before { content: ""; position: absolute; left: 3px; top: .62em; width: 10px; height: 10px; border-radius: 3px; background: var(--ds-500); }
+ul.points.sm { font-size: 19px; gap: 11px; }
+.card { background: var(--paper); border: 1px solid var(--line); border-radius: 18px; padding: 22px 24px; box-shadow: 0 1px 2px rgba(16, 24, 40, .05); min-width: 0; }
+.card h3 { margin: 0 0 8px; font-size: 25px; }
+.card p { margin: 0; font-size: 19px; line-height: 1.5; color: var(--ink-2); }
+.card .tags { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 14px; }
+.c-blue { border-top: 6px solid var(--ds-500); } .c-teal { border-top: 6px solid var(--teal); } .c-violet { border-top: 6px solid var(--violet); }
+.c-amber { border-top: 6px solid var(--amber); } .c-coral { border-top: 6px solid var(--coral); } .c-green { border-top: 6px solid var(--green); }
+.icon { width: 56px; height: 56px; border-radius: 14px; display: grid; place-items: center; margin-bottom: 14px; }
+.icon svg { width: 34px; height: 34px; }
+.i-blue { background: var(--ds-50); color: var(--ds-500); } .i-teal { background: var(--teal-50); color: var(--teal); } .i-violet { background: var(--violet-50); color: var(--violet); }
+code, .mono { font-family: var(--mono); font-size: .9em; }
+:not(pre) > code { background: var(--ds-50); color: var(--ds-600); padding: 1px 6px; border-radius: 6px; }
+.callout { border-left: 6px solid var(--ds-500); background: var(--ds-50); padding: 14px 18px; border-radius: 10px; font-size: 20px; line-height: 1.5; color: var(--ink-2); }
+.callout.warn { border-color: var(--amber); background: var(--amber-50); }
+.callout.ok { border-color: var(--green); background: var(--green-50); }
+.callout.bad { border-color: var(--coral); background: var(--coral-50); }
+.chip { display: inline-flex; align-items: center; gap: 6px; padding: 4px 12px; border-radius: 999px; font-size: 17px; font-weight: 600; background: var(--ds-50); color: var(--ds-600); border: 1px solid var(--ds-200); white-space: nowrap; }
+.chip.teal { background: var(--teal-50); color: var(--teal); border-color: #A9DEDB; }
+.chip.violet { background: var(--violet-50); color: var(--violet); border-color: #CFC6FF; }
+.chip.amber { background: var(--amber-50); color: var(--amber); border-color: #F2D29B; }
+.chip.coral { background: var(--coral-50); color: var(--coral); border-color: #F2B9B4; }
+.chip.green { background: var(--green-50); color: var(--green); border-color: #A9D9BE; }
+.chips { display: flex; flex-wrap: wrap; gap: 10px; }
+.src { position: absolute; left: 72px; right: 72px; bottom: 20px; font-size: 14.5px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.src a { color: var(--muted); }
+table.tbl { width: 100%; border-collapse: separate; border-spacing: 0; background: var(--paper); border: 1px solid var(--line); border-radius: 14px; overflow: hidden; font-size: 19px; }
+table.tbl th { text-align: left; padding: 11px 16px; background: var(--ds-50); color: var(--ds-800); font-size: 17px; }
+table.tbl td { padding: 10px 16px; border-top: 1px solid var(--line); vertical-align: top; line-height: 1.45; }
+pre.code, pre.term { margin: 0; padding: 20px 24px; border-radius: 16px; background: #0F1115; color: #E6EDF3; font-family: var(--mono); font-size: 18px; line-height: 1.55; white-space: pre; overflow: hidden; }
+pre.term .p { color: #7AAAFF; } pre.term .o { color: #A8B3C7; } pre.term .h { color: #F6C177; }
+.tk { color: #7AAAFF; } .ts { color: #9FDFA8; } .tc { color: #8B95A7; font-style: italic; } .tf { color: #F6C177; } .tn { color: #F28FAD; }
+pre.tree { margin: 0; padding: 20px 24px; border-radius: 16px; background: var(--paper); border: 1px solid var(--line); font-family: var(--mono); font-size: 19px; line-height: 1.7; color: var(--ink); white-space: pre; overflow: hidden; align-self: start; }
+pre.tree .c { color: var(--muted); } pre.tree .d { color: var(--ds-500); font-weight: 700; }
+.badge { display: inline-block; min-width: 34px; padding: 2px 10px; border-radius: 8px; background: var(--ds-500); color: #fff; font-weight: 800; font-size: 16px; text-align: center; }
+/* hero and section dividers */
+.slide.hero, .slide.divider { color: #fff; justify-content: center; padding: 90px 110px; background: radial-gradient(1100px 650px at 82% 18%, rgba(86, 134, 254, .38), transparent 60%), linear-gradient(135deg, #161D31 0%, #283142 48%, #34415B 100%); }
+.hero .kicker, .divider .kicker { color: var(--ds-300); }
+.hero h1 { margin: 18px 0 6px; font-family: "DshBrand", var(--font); font-weight: 500; font-size: 104px; letter-spacing: -.015em; line-height: 1.05; }
+.hero .sub { font-size: 38px; color: var(--ds-200); }
+.hero .pills, .divider .subs { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 44px; }
+.hero .pills span, .divider .subs span { padding: 9px 20px; border-radius: 999px; border: 1px solid rgba(255, 255, 255, .3); background: rgba(255, 255, 255, .06); font-size: 21px; }
+.hero .meta { margin-top: 56px; font-size: 21px; color: #B7C8FE; }
+.hero .meta code { background: rgba(255, 255, 255, .1); color: #fff; }
+.hero .keys { margin-top: 14px; font-size: 18px; color: #8FA3BF; }
+kbd { display: inline-block; min-width: 26px; padding: 1px 7px; margin: 0 2px; border-radius: 6px; border: 1px solid #8FA3BF; font-family: var(--mono); font-size: .85em; text-align: center; }
+.divider .num { font-family: "DshBrand", var(--font); font-weight: 500; font-size: 160px; line-height: 1; color: rgba(255, 255, 255, .2); }
+.divider h2 { color: #fff; font-size: 66px; margin-top: 10px; }
+.divider .q { margin-top: 18px; font-size: 28px; color: var(--ds-200); }
+/* overlay ui */
+#progress { position: fixed; left: 0; bottom: 0; height: 4px; width: 0; background: var(--ds-450); transition: width .3s ease; z-index: 11; }
+#hud { position: fixed; left: 0; right: 0; bottom: 6px; height: 38px; padding: 0 12px; display: flex; align-items: center; justify-content: space-between; gap: 12px; z-index: 10; color: #C9D3E6; font-size: 13px; transition: opacity .3s ease; pointer-events: none; }
+#hud.idle { opacity: 0; }
+#hud > div { display: flex; align-items: center; gap: 6px; pointer-events: auto; padding: 4px 6px; border-radius: 9px; background: rgba(15, 17, 21, .45); backdrop-filter: blur(6px); }
+#hud button { height: 26px; min-width: 30px; padding: 0 8px; border-radius: 7px; border: 1px solid rgba(255, 255, 255, .2); background: rgba(255, 255, 255, .08); color: #E6EDF3; font-size: 13px; cursor: pointer; }
+#hud button:hover { background: rgba(255, 255, 255, .18); }
+#counter { min-width: 64px; text-align: center; font-variant-numeric: tabular-nums; }
+#toc { position: fixed; top: 0; right: 0; bottom: 0; width: 380px; padding: 16px 0 40px; overflow: auto; background: #fff; z-index: 20; transform: translateX(105%); transition: transform .25s ease; box-shadow: -12px 0 40px rgba(0, 0, 0, .35); font-size: 15px; }
+#toc.open { transform: none; }
+#toc h4 { margin: 14px 20px 6px; font-size: 13px; letter-spacing: .08em; color: var(--ds-500); }
+#toc a { display: flex; gap: 10px; padding: 6px 20px; color: var(--ink); text-decoration: none; }
+#toc a:hover { background: var(--ds-50); }
+#toc a.cur { background: var(--ds-100); font-weight: 700; }
+#toc a .n { flex: none; width: 26px; text-align: right; color: var(--muted); font-variant-numeric: tabular-nums; }
+#help { position: fixed; inset: 0; z-index: 30; display: none; align-items: center; justify-content: center; background: rgba(10, 14, 24, .55); }
+#help.open { display: flex; }
+#help .box { min-width: 440px; padding: 24px 30px; border-radius: 16px; background: #fff; font-size: 16px; line-height: 2; }
+#help .box h3 { margin: 0 0 8px; }
+#notice { position: fixed; top: 14px; left: 50%; transform: translateX(-50%); z-index: 25; max-width: 820px; padding: 10px 16px; border-radius: 10px; background: var(--amber-50); color: #6B4A00; border: 1px solid #F2D29B; font-size: 14px; }
+/* slide components */
+.agenda { grid-template-columns: repeat(3, 1fr); grid-template-rows: 1fr 1fr; }
+.agenda a { display: flex; flex-direction: column; justify-content: center; gap: 10px; padding: 26px 30px; border-radius: 20px; background: var(--paper); border: 1px solid var(--line); text-decoration: none; color: var(--ink); transition: transform .15s ease, box-shadow .15s ease; }
+.agenda a:hover { transform: translateY(-3px); box-shadow: 0 10px 30px rgba(40, 49, 66, .12); }
+.agenda .no { font-family: "DshBrand", var(--font); font-size: 46px; font-weight: 500; color: var(--ds-450); line-height: 1; }
+.agenda b { font-size: 30px; }
+.agenda span.q { font-size: 20px; color: var(--muted); line-height: 1.45; }
+.kpis { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; align-content: center; }
+.kpi { padding: 16px 20px; border-radius: 16px; background: var(--paper); border: 1px solid var(--line); }
+.kpi b { display: block; font-family: "DshBrand", var(--font); font-weight: 500; font-size: 52px; line-height: 1.1; color: var(--ds-500); }
+.kpi span { font-size: 17px; color: var(--muted); }
+.stepper { display: grid; grid-template-columns: 1fr 1fr; grid-auto-rows: 1fr; gap: 14px 26px; }
+.step { display: flex; gap: 16px; align-items: flex-start; padding: 14px 18px; border-radius: 14px; background: var(--paper); border: 1px solid var(--line); }
+.step .no { flex: none; width: 38px; height: 38px; border-radius: 50%; display: grid; place-items: center; background: var(--ds-500); color: #fff; font-weight: 800; font-size: 19px; }
+.step b { display: block; font-size: 21px; }
+.step p { margin: 3px 0 0; font-size: 17px; line-height: 1.45; color: var(--ink-2); }
+.stack { display: flex; flex-direction: column; gap: 16px; justify-content: center; }
+.layer { display: grid; grid-template-columns: 300px 1fr 320px; align-items: center; gap: 24px; padding: 20px 26px; border-radius: 18px; background: var(--paper); border: 1px solid var(--line); border-left: 10px solid var(--ds-500); }
+.layer h3 { margin: 0; font-size: 27px; }
+.layer h3 small { display: block; margin-top: 4px; font-size: 16px; font-weight: 500; color: var(--muted); }
+.layer p { margin: 0; font-size: 19px; line-height: 1.5; color: var(--ink-2); }
+.layer .where { font-family: var(--mono); font-size: 15.5px; color: var(--muted); line-height: 1.6; }
+.layer.l2 { border-left-color: var(--teal); margin: 0 30px; }
+.layer.l3 { border-left-color: var(--violet); margin: 0 60px; }
+.mode { display: flex; flex-direction: column; gap: 12px; }
+.mode .head { display: flex; align-items: center; justify-content: space-between; }
+.mode .head code { font-size: 22px; font-weight: 700; }
+.tries { margin-top: auto; display: flex; flex-direction: column; gap: 9px; padding-top: 14px; border-top: 1px dashed var(--line); }
+.tries .row-label { margin-bottom: 0; }
+.tries > div:not(.row-label) { display: flex; align-items: center; gap: 6px; font-size: 18px; color: var(--muted); }
+.tries > div:not(.row-label) .chip { margin-left: auto; }
+.meter { height: 14px; border-radius: 999px; background: #EEF1F6; overflow: hidden; }
+.meter i { display: block; height: 100%; border-radius: 999px; }
+.tape { display: flex; flex-wrap: wrap; gap: 10px; align-content: flex-start; }
+.ev { display: inline-flex; align-items: center; gap: 8px; padding: 8px 12px; border-radius: 10px; font-family: var(--mono); font-size: 16.5px; border: 1px solid var(--line); background: var(--paper); }
+.ev i { font-style: normal; color: var(--muted); font-size: 14px; }
+.ev.k-bound { background: #F1F3F7; border-color: #D5DAE3; }
+.ev.k-surf { background: var(--ds-50); border-color: var(--ds-300); color: var(--ds-600); font-weight: 700; }
+.ev.k-meta { background: var(--amber-50); border-color: #F2D29B; }
+.ev.k-exec { background: var(--teal-50); border-color: #A9DEDB; }
+.ev.k-plug { background: var(--violet-50); border-color: #CFC6FF; }
+.ev.shadow { opacity: .45; border-style: dashed; text-decoration: line-through; }
+.tape.lg { gap: 12px; }
+.tape.lg .ev { font-size: 19px; padding: 11px 15px; }
+.tape.lg .ev i { font-size: 15px; }
+.card.rich > * + * { margin-top: 12px; }
+.card.rich p { font-size: 20px; }
+.card.rich p.more { font-size: 18px; color: var(--muted); }
+.flowmini { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; font-size: 16px; }
+.flowmini span { padding: 3px 10px; border-radius: 8px; background: var(--teal-50); color: var(--teal); font-weight: 600; }
+.flowmini i { font-style: normal; color: var(--muted); }
+.legend { display: flex; flex-wrap: wrap; gap: 10px 18px; font-size: 16px; color: var(--ink-2); }
+.legend span { display: inline-flex; align-items: center; gap: 8px; }
+.legend i { width: 16px; height: 16px; border-radius: 4px; display: inline-block; border: 1px solid var(--line); }
+.row-label { font-size: 18px; font-weight: 700; color: var(--ink-2); margin-bottom: 10px; }
+.arrow-down { text-align: center; font-size: 30px; color: var(--ds-450); line-height: 1; }
+.kv { display: flex; flex-direction: column; gap: 14px; }
+.kv .req { display: grid; grid-template-columns: 250px 1fr; align-items: center; gap: 16px; }
+.kv .req > b { font-size: 20px; color: var(--ink-2); }
+.kv .segs { display: flex; gap: 4px; }
+.kv .seg { padding: 12px 16px; border-radius: 9px; font-size: 18px; font-weight: 600; white-space: nowrap; border: 2px solid transparent; }
+.seg.hit { background: var(--green-50); border-color: #8FD1AC; color: #1E6B45; }
+.seg.new { background: var(--amber-50); border-color: #F2C27A; color: #7A4B00; }
+.seg.miss { background: var(--coral-50); border-color: #EFA59E; color: #8C2A22; }
+.hl-grid { grid-template-columns: repeat(6, 1fr); grid-auto-rows: 1fr; gap: 14px; }
+.hl { display: flex; flex-direction: column; justify-content: center; gap: 8px; padding: 16px 17px; border-radius: 14px; background: var(--paper); border: 1px solid var(--line); }
+.hl .badge { align-self: flex-start; }
+.hl b { font-size: 23px; line-height: 1.35; }
+.hl span { font-size: 18.5px; line-height: 1.5; color: var(--muted); }
+.hl span.badge { color: #fff; font-size: 16px; line-height: 1.4; }
+.big-quote { font-size: 30px; line-height: 1.5; font-weight: 700; color: var(--ds-900); }
+.big-quote small { display: block; margin-top: 10px; font-size: 19px; font-weight: 500; color: var(--muted); }
+.arch { display: flex; flex-direction: column; justify-content: center; gap: 8px; min-width: 0; }
+.band { display: grid; grid-template-columns: 150px 1fr; align-items: center; gap: 16px; padding: 14px 18px; border-radius: 16px; background: var(--paper); border: 1px solid var(--line); }
+.band > .tag { font-size: 20px; font-weight: 800; color: var(--ds-600); }
+.band > .tag small { display: block; margin-top: 2px; font-size: 13.5px; font-weight: 500; color: var(--muted); }
+.band .items { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
+.band .node { padding: 7px 13px; border-radius: 10px; background: var(--ds-50); border: 1px solid var(--ds-300); font-size: 17.5px; font-weight: 600; }
+.band .node.alt { background: var(--amber-50); border-color: #F2D29B; }
+.band .node.violet { background: var(--violet-50); border-color: #CFC6FF; }
+.band .to { color: var(--ds-450); font-weight: 800; font-size: 20px; }
+.band.tree .items { display: grid; grid-template-columns: repeat(4, 1fr); }
+.band .group { padding: 10px 12px; border-radius: 12px; background: #FAFBFD; border: 1px solid var(--line); }
+.band .group b { display: block; font-size: 18px; }
+.band .group span { font-family: var(--mono); font-size: 14px; line-height: 1.5; color: var(--muted); }
+.flow-down { text-align: center; font-size: 18px; line-height: 1; color: var(--ds-450); }
+@media (prefers-reduced-motion: reduce) { .slide, .slide.active { transition: none; } }
+@media print {
+  @page { size: 1600px 900px; margin: 0; }
+  html, body { height: auto; overflow: visible; background: #fff; }
+  #viewport { position: static; }
+  #stage { position: static; transform: none !important; width: 1600px; height: auto; box-shadow: none; overflow: visible; }
+  .slide { position: relative; width: 1600px; height: 900px; opacity: 1; visibility: visible; transform: none; break-after: page; }
+  #hud, #progress, #toc, #help, #notice { display: none !important; }
+}
+</style>
+</head>
+<body>
+<div id="viewport"><div id="stage">
+
+<section class="slide hero" data-title="封面" data-section="DeepSeek Harness">
+  <div class="kicker">架构导览 · 学习分享</div>
+  <h1>DeepSeek Harness</h1>
+  <div class="sub">一个“全插件”的 coding agent 运行时</div>
+  <div class="pills"><span>01 启动</span><span>02 插件加载</span><span>03 权限控制</span><span>04 对话管理</span><span>05 设计巧思</span></div>
+  <div class="meta">基于 <code>@deepseek-ai/dsh</code> 0.2.3-alpha.2 源码整理 · 2026-11-24 · 文字版见 <code>study_doc/architecture.md</code></div>
+  <div class="keys"><kbd>←</kbd><kbd>→</kbd> 翻页　<kbd>T</kbd> 目录　<kbd>F</kbd> 全屏　<kbd>?</kbd> 帮助</div>
+</section>
+
+<section class="slide" data-title="议程" data-section="议程">
+  <div class="kicker">Agenda</div>
+  <h2>这次分享回答五个问题</h2>
+  <div class="body agenda">
+    <a href="#overview"><span class="no">00</span><b>全景</b><span class="q">dsh 是什么，由哪些部分组成</span></a>
+    <a href="#sec-start"><span class="no">01</span><b>启动</b><span class="q">代码从哪里启动，启动时做了什么</span></a>
+    <a href="#sec-plugins"><span class="no">02</span><b>插件加载</b><span class="q">插件如何被组合、加载、热重载</span></a>
+    <a href="#sec-perm"><span class="no">03</span><b>权限控制</b><span class="q">沙箱、审批与预设如何配合</span></a>
+    <a href="#sec-conv"><span class="no">04</span><b>对话管理</b><span class="q">Agent、Session 与 Agent Loop 如何推进对话</span></a>
+    <a href="#sec-design"><span class="no">05</span><b>设计巧思</b><span class="q">值得借鉴的 17 个设计</span></a>
+  </div>
+</section>
+
+<section class="slide" id="overview" data-title="一句话看懂 dsh" data-section="00 全景">
+  <div class="kicker">00 · 全景</div>
+  <h2>一句话看懂 dsh</h2>
+  <p class="lead">模型适配器、工具注册表、会话日志、权限策略，甚至 agent loop 本身，都是 Cordis 插件。</p>
+  <div class="body td">
+    <ul class="points">
+      <li><b>全是插件</b>：没有可以改动的特权内核，扩展就是在旁边再挂一个插件。</li>
+      <li><b>组合即数据</b>：profile 把多个 bundle 的 YAML 补丁层叠成一棵插件树。</li>
+      <li><b>应用接管</b>：Web 服务器、headless 执行器、SDK 与 ACP 服务器都是树里的普通插件。</li>
+      <li><b>日志为本</b>：每个 Agent 的对话写进 append-only 的 Session 事件日志。</li>
+    </ul>
+    <div class="arch">
+      <div class="band"><span class="tag">入口</span><div class="items"><span class="node">pnpm dsh</span><span class="node">dsh（安装包）</span><span class="node">TS / Python SDK</span><span class="node">Desktop Host</span></div></div>
+      <div class="flow-down">▼</div>
+      <div class="band"><span class="tag">启动层</span><div class="items"><span class="node">runCli()</span><span class="to">→</span><span class="node">runProfile()</span><span class="to">→</span><span class="node">boot()</span><span class="to">←</span><span class="node alt">profile 目录 + 补丁层叠（YAML）</span></div></div>
+      <div class="flow-down">▼</div>
+      <div class="band tree"><span class="tag">插件树<small>一个 Cordis 根 Context</small></span><div class="items">
+        <div class="group"><b>核心</b><span>llm · session · tools · agent · agent-loop</span></div>
+        <div class="group"><b>能力</b><span>fs · shell · subprocess · sandbox · web · mcp · skill · subagent</span></div>
+        <div class="group"><b>策略</b><span>sandbox-policy · approval · permission · timeout · checkpoint · compaction</span></div>
+        <div class="group"><b>应用</b><span>web-app · headless · sdk-app · acp-app</span></div>
+      </div></div>
+      <div class="flow-down">▼</div>
+      <div class="band"><span class="tag">每个 Agent</span><div class="items"><span class="node">agent.ctx：作用域内的工具、提示词、监听者</span><span class="node violet">Session：append-only 事件日志</span></div></div>
+    </div>
+  </div>
+  <div class="src">参考：<a href="../docs/architecture.md" target="_blank">docs/architecture.md</a> · <a href="architecture.md" target="_blank">study_doc/architecture.md</a></div>
+</section>
+
+<section class="slide" data-title="三条主线" data-section="00 全景">
+  <div class="kicker">00 · 全景</div>
+  <h2>读代码时抓住三条主线</h2>
+  <div class="body cols-3">
+    <div class="card c-blue">
+      <div class="icon i-blue"><svg viewBox="0 0 48 48" fill="none" stroke="currentColor" stroke-width="3.5" stroke-linejoin="round"><path d="M24 6 42 15 24 24 6 15Z"/><path d="M6 24l18 9 18-9"/><path d="M6 33l18 9 18-9"/></svg></div>
+      <h3>组合</h3>
+      <p>进程里运行哪些插件，完全由 YAML 补丁层决定：bundle 打底，profile、home、命令行逐层覆盖。</p>
+      <div class="tags"><span class="chip">profile</span><span class="chip">bundle</span><span class="chip">patch</span><span class="chip">cordis.yml</span></div>
+      <p style="margin-top:18px;color:var(--muted)">→ 01 启动 · 02 插件加载</p>
+    </div>
+    <div class="card c-teal">
+      <div class="icon i-teal"><svg viewBox="0 0 48 48" fill="none" stroke="currentColor" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round"><path d="M6 12h26"/><path d="M26 6l6 6-6 6"/><path d="M6 24h36"/><path d="M36 18l6 6-6 6"/><path d="M6 36h20"/><path d="M20 30l6 6-6 6"/></svg></div>
+      <h3>事件</h3>
+      <p>插件之间通过类型化事件协作；权限、超时、落盘、压缩都作为 waterfall 监听者插入，不改循环代码。</p>
+      <div class="tags"><span class="chip teal">waterfall</span><span class="chip teal">tools/*</span><span class="chip teal">agent/*</span><span class="chip teal">llm/stream</span></div>
+      <p style="margin-top:18px;color:var(--muted)">→ 02 插件加载 · 03 权限控制</p>
+    </div>
+    <div class="card c-violet">
+      <div class="icon i-violet"><svg viewBox="0 0 48 48" fill="none" stroke="currentColor" stroke-width="3.5" stroke-linecap="round"><rect x="9" y="5" width="30" height="38" rx="4"/><path d="M16 15h16M16 23h16M16 31h10"/></svg></div>
+      <h3>日志</h3>
+      <p>对话的唯一事实来源是 append-only 的 Session 事件日志；模型看到的历史全部从日志派生。</p>
+      <div class="tags"><span class="chip violet">Session</span><span class="chip violet">Surface</span><span class="chip violet">deriveMessages</span></div>
+      <p style="margin-top:18px;color:var(--muted)">→ 04 对话管理</p>
+    </div>
+  </div>
+</section>
+
+<section class="slide" data-title="仓库规模" data-section="00 全景">
+  <div class="kicker">00 · 全景</div>
+  <h2>仓库规模</h2>
+  <div class="body" style="grid-template-columns:.62fr 1.38fr">
+    <div class="kpis">
+      <div class="kpi"><b>397</b><span>packages/ 下的包</span></div>
+      <div class="kpi"><b>55</b><span>包分组</span></div>
+      <div class="kpi"><b>101</b><span>dsh-base 插入的插件行</span></div>
+      <div class="kpi"><b>65</b><span>Session 事件类型</span></div>
+      <div class="kpi"><b>52</b><span>verify-* 校验脚本</span></div>
+      <div class="kpi"><b>10</b><span>启动时必须激活的行</span></div>
+    </div>
+    <div class="diagram" data-mmd><script type="text/x-mermaid">
+xychart-beta horizontal
+  title "包数量最多的 12 个分组"
+  x-axis ["client", "experimental", "util", "session", "host", "core", "shell", "api", "connector", "llm", "subagent", "fs"]
+  y-axis "包数量" 0 --> 80
+  bar [79, 59, 24, 23, 11, 10, 10, 9, 9, 9, 9, 8]
+</script></div>
+  </div>
+  <div class="src">统计口径：packages/&lt;group&gt;/&lt;pkg&gt;/package.json · <a href="../apps/cli/composition.md" target="_blank">apps/cli/composition.md</a> · <a href="../docs/persistence-catalog.md" target="_blank">docs/persistence-catalog.md</a> · scripts/verify-*.ts（不含 spec）</div>
+</section>
+
+<section class="slide" data-title="概念地图" data-section="00 全景">
+  <div class="kicker">00 · 全景</div>
+  <h2>概念地图</h2>
+  <div class="body full">
+    <div class="diagram" data-mmd data-max="1.5"><script type="text/x-mermaid">
+mindmap
+  root((dsh))
+    Cordis 运行时
+      Context：服务容器
+      Service：ctx 上的一个 key
+      Plugin：apply 或 Service 子类
+      Fiber：插件实例生命周期
+      Effect：可撤销的注册
+    组合
+      Profile：bundle 列表与用户补丁
+      Bundle：携带补丁的 npm 包
+      Patch：按 id 覆盖或 insert
+      Entry：cordis.yml 中的一行
+    对话
+      Agent：运行中的驱动者
+      Session：append-only 日志
+      Turn 与 Step
+      Surface：模型可见的投影
+    能力与权限
+      Seam：定义、实现、使用三角色
+      Tools：统一执行管线
+      Sandbox：文件副作用
+      Approval：一次性批准
+</script></div>
+  </div>
+</section>
+
+<section class="slide divider" id="sec-start" data-title="01 启动" data-section="01 启动">
+  <div class="num">01</div>
+  <div class="kicker">Section 01</div>
+  <h2>启动：从 dsh 命令到运行中的插件树</h2>
+  <div class="q">代码从哪里启动？启动时做了什么？</div>
+  <div class="subs"><span>入口</span><span>runCli()</span><span>runProfile()</span><span>boot()</span><span>启动审计</span><span>应用接管</span><span>动手验证</span></div>
+</section>
+
+<section class="slide" data-title="入口：所有路径汇到 runProfile" data-section="01 启动">
+  <div class="kicker">01 · 启动</div>
+  <h2>入口：所有启动路径最终汇到 runProfile()</h2>
+  <div class="body dt">
+    <div class="diagram" data-mmd><script type="text/x-mermaid">
+flowchart TB
+  d["TS / Python SDK"] -->|"启动子进程 dsh --profile sdk"| b
+  a["pnpm dsh …<br/>tsx 运行 apps/cli/src/bin.ts"] --> rc
+  b["安装后的 dsh<br/>lib/bin.js"] --> rc
+  c["磁盘启动器与嵌入式运行时<br/>installed-bin.ts"] --> rc
+  rc["runCli()"] --> rp["runProfile()"]
+  e["Desktop Host"] -->|"复用 profile 启动流程"| rp
+  rp --> boot["boot()"]
+  classDef hot fill:#4176E6,stroke:#283142,color:#ffffff
+  class rc,rp,boot hot
+</script></div>
+    <div class="col">
+      <div class="callout">受支持的 Node 应用<b>只能</b>通过具名 <code>dsh</code> profile 启动；包 bin、demo、SDK 都不能绕过它。</div>
+      <ul class="points sm">
+        <li><code>dsh &lt;name&gt;</code> 是 <code>dsh --profile &lt;name&gt;</code> 的简写</li>
+        <li>内置 profile：<code>web</code>、<code>headless</code>、<code>sdk</code>、<code>sdk-minimal</code>、<code>acp</code></li>
+        <li><code>verify-application-entrypoints</code> 门禁拒绝绕过 <code>dsh</code> 的 Node 应用入口</li>
+      </ul>
+    </div>
+  </div>
+  <div class="src">源码：<a href="../apps/cli/src/bin.ts" target="_blank">apps/cli/src/bin.ts</a> · <a href="../apps/cli/src/installed-bin.ts" target="_blank">installed-bin.ts</a> · <a href="../scripts/verify-application-entrypoints.ts" target="_blank">scripts/verify-application-entrypoints.ts</a></div>
+</section>
+
+<section class="slide" data-title="runCli()：参数解析与模式分派" data-section="01 启动">
+  <div class="kicker">01 · 启动</div>
+  <h2>runCli()：只解析启动器自己的参数</h2>
+  <div class="body td">
+    <ul class="points">
+      <li>启动器只认 <code>--profile</code>、<code>--patch</code>、<code>--dump-config</code> 等少数参数</li>
+      <li>第一个不认识的 token 之后，参数<b>原样</b>交给应用：<code>dsh --profile headless --help</code> 打印的是 headless 自己的帮助</li>
+      <li>四种模式各自动态 <code>import()</code>；<code>switch</code> 末尾 <code>invocation satisfies never</code> 保证穷尽</li>
+      <li>环境快照优先级：继承的环境变量 &gt; 当前目录 <code>.env</code> &gt; <code>$DSH_HOME/.env</code></li>
+    </ul>
+    <div class="diagram" data-mmd><script type="text/x-mermaid">
+flowchart TB
+  argv["process.argv"] --> parse["parseDshArgs()"]
+  parse -->|"--profile 或 dsh name"| p["profile<br/>启动插件树"]
+  parse -->|plugin| pl["plugin<br/>转发给 pnpm"]
+  parse -->|"--dump-config"| dc["dump-config<br/>打印组合结果"]
+  parse -->|"--dump-config-schema"| ds["dump-config-schema<br/>打印配置 schema"]
+  p --> env["loadLayeredEnv('dsh')<br/>冻结的环境快照"]
+  env --> rp["runProfile()"]
+  p -.->|"剩余参数原样提供"| args["ctx.cmdlineArgs<br/>由应用插件解析"]
+  classDef hot fill:#4176E6,stroke:#283142,color:#ffffff
+  class p,rp hot
+</script></div>
+  </div>
+  <div class="src">源码：<a href="../apps/cli/src/bin.ts" target="_blank">apps/cli/src/bin.ts</a> · <a href="../apps/cli/src/args.ts" target="_blank">apps/cli/src/args.ts</a> · <a href="../packages/boot/app-boot/src/index.ts" target="_blank">loadLayeredEnv()</a></div>
+</section>
+
+<section class="slide" data-title="启动时间线" data-section="01 启动">
+  <div class="kicker">01 · 启动</div>
+  <h2>一次启动经历的阶段</h2>
+  <div class="body full">
+    <div class="diagram" data-mmd data-max="1.35"><script type="text/x-mermaid">
+timeline
+  section runCli()
+    解析参数 : 冻结环境快照
+  section runProfile()
+    组合 profile : 代理与 User-Agent : 读取 bundle 补丁 : 重写空的根 cordis.yml
+    兜底设施 : 信号处理 : fail-loud
+  section boot()
+    根 Context : 安装 Loader : prepare 提供宿主服务
+    根 Include : 应用全部补丁 : 插件按依赖激活 : 启动审计
+  section 应用接管
+    appReady : 应用插件开始工作
+</script></div>
+  </div>
+</section>
+
+<section class="slide" data-title="runProfile() 的 8 个步骤" data-section="01 启动">
+  <div class="kicker">01 · 启动</div>
+  <h2>runProfile()：所有 profile 共用的启动流程</h2>
+  <div class="body full">
+    <div class="stepper">
+      <div class="step"><span class="no">1</span><div><b>标记来源</b><p><code>DSH_USER_AGENT_SUFFIX=dsh-profile/&lt;name&gt;</code>，模型服务商能看到请求来自哪个 profile</p></div></div>
+      <div class="step"><span class="no">5</span><div><b>fail-loud</b><p>未处理的 rejection 或异常一律致命：先写诊断，2 秒内销毁插件树（恢复终端），再退出</p></div></div>
+      <div class="step"><span class="no">2</span><div><b>安装代理</b><p>Node 的 <code>fetch</code> 默认不读代理变量；从启动快照安装，<code>.env</code> 里的代理也生效</p></div></div>
+      <div class="step"><span class="no">6</span><div><b>计算补丁层</b><p>组装 <code>ProfileContext</code>，<code>readProfilePatches()</code> 得到有序补丁列表</p></div></div>
+      <div class="step"><span class="no">3</span><div><b>组合 profile</b><p>不存在的内置 profile 自动初始化；逐个解析 bundle，失败的跳过并警告；重写空的根 <code>cordis.yml</code></p></div></div>
+      <div class="step"><span class="no">7</span><div><b>调用 boot()</b><p>在 <code>prepare</code> 回调里提供 profileContext、启动环境、包解析服务和命令行参数</p></div></div>
+      <div class="step"><span class="no">4</span><div><b>信号处理</b><p>SIGTERM 以 0 退出，SIGINT 以 130 退出；在启动完成前就安装，重复信号升级为强制退出</p></div></div>
+      <div class="step"><span class="no">8</span><div><b>宣布就绪</b><p>根 Fiber 仍为 ACTIVE 时 <code>appReady.commit()</code>，应用插件此后才对外宣布</p></div></div>
+    </div>
+  </div>
+  <div class="src">源码：<a href="../apps/cli/src/profile-boot.ts" target="_blank">apps/cli/src/profile-boot.ts</a> · <a href="../apps/cli/src/process-shutdown.ts" target="_blank">process-shutdown.ts</a> · <a href="../packages/boot/app-boot/src/profile-context.ts" target="_blank">profile-context.ts</a></div>
+</section>
+
+<section class="slide" data-title="boot() 时序" data-section="01 启动">
+  <div class="kicker">01 · 启动</div>
+  <h2>boot()：根 Context → Loader → 根 Include</h2>
+  <div class="body" style="grid-template-rows:1fr auto;gap:20px">
+    <div class="diagram" data-mmd><script type="text/x-mermaid">
+sequenceDiagram
+  participant RP as runProfile
+  participant AB as boot()
+  participant L as Cordis Loader
+  participant I as cordis:include
+  participant T as 插件树
+  RP->>AB: boot(rootConfig, patches, prepare)
+  AB->>L: new Context() 并安装 Loader
+  AB->>AB: prepare(ctx) 提供宿主服务
+  AB->>I: mountRootInclude()
+  I->>L: 应用全部补丁，交出完整插件行
+  L->>T: 并发 import，按 inject 依赖激活
+  AB->>L: loader.await()
+  AB->>AB: auditStartupEntries()
+  AB-->>RP: 根 ctx
+</script></div>
+    <div class="cols-3" style="display:grid;gap:20px">
+      <div class="callout"><code>prepare</code> 阶段还没有任何配置行挂载，适合提供宿主级服务。</div>
+      <div class="callout">根 Include 是固定 id 为 <code>include</code> 的 Loader entry，诊断输出因此稳定。</div>
+      <div class="callout">出错时区分 <code>host preparation failed</code> 与 <code>plugin tree failed to load</code>。</div>
+    </div>
+  </div>
+  <div class="src">源码：<a href="../packages/boot/app-boot/src/index.ts" target="_blank">packages/boot/app-boot/src/index.ts</a>（boot、mountRootInclude、auditStartupEntries）</div>
+</section>
+
+<section class="slide" data-title="Profile 在磁盘上" data-section="01 启动">
+  <div class="kicker">01 · 启动</div>
+  <h2>Profile 在磁盘上：一个 pnpm 项目</h2>
+  <div class="body cols-2" style="grid-template-columns:1.2fr 1fr">
+    <pre class="tree" style="font-size:20.5px;line-height:1.8"><span class="d">$DSH_HOME/</span>                  <span class="c"># 默认 ~/.dsh</span>
+├── .env                    <span class="c"># home 级环境变量层</span>
+├── cordis.patch.yml        <span class="c"># home 补丁：作用于所有 profile</span>
+├── .credentials.yaml       <span class="c"># 凭据存储</span>
+├── <span class="d">sessions/</span>               <span class="c"># 会话日志（JSONL）</span>
+└── <span class="d">profiles/</span>
+    └── <span class="d">headless/</span>
+        ├── package.json    <span class="c"># dsh.profile.bundles</span>
+        ├── cordis.yml      <span class="c"># 永远是 []，每次启动重写</span>
+        ├── cordis.patch.yml <span class="c"># 用户补丁层</span>
+        ├── pnpm-workspace.yaml
+        └── node_modules/   <span class="c"># 外部插件</span></pre>
+    <div class="col">
+      <table class="tbl">
+        <tr><th>内置 profile</th><th>bundle 列表（按层叠顺序）</th></tr>
+        <tr><td><code>web</code></td><td>dsh-base → dsh-web-app</td></tr>
+        <tr><td><code>headless</code></td><td>dsh-base → dsh-headless</td></tr>
+        <tr><td><code>sdk</code></td><td>dsh-base → dsh-sdk-app</td></tr>
+        <tr><td><code>acp</code></td><td>dsh-base → dsh-acp-app</td></tr>
+        <tr><td><code>sdk-minimal</code></td><td>dsh-sdk-minimal（不叠加 dsh-base）</td></tr>
+      </table>
+      <div class="callout">首次使用内置 profile 时自动初始化；自定义名字需要先 <code>dsh plugin --profile &lt;name&gt; add &lt;package&gt;</code>。</div>
+      <div class="callout ok"><code>profiles/headless/</code> 由 <code>initProfile()</code> 生成；home 层的其他文件由各自的插件或用户按需创建。</div>
+    </div>
+  </div>
+  <div class="src">源码：<a href="../packages/boot/app-boot/src/profile.ts" target="_blank">app-boot/src/profile.ts</a>（initProfile、loadProfile）· <a href="../packages/util/official-bundles/src/bundles.ts" target="_blank">official-bundles/src/bundles.ts</a>（PROFILE_TEMPLATES）· 目录结构已用临时 DSH_HOME 实测</div>
+</section>
+
+<section class="slide" data-title="启动审计" data-section="01 启动">
+  <div class="kicker">01 · 启动</div>
+  <h2>启动审计：必需的行必须激活</h2>
+  <p class="lead">Loader 落定后，根 Include 和下面这些行（只检查树中存在且未禁用的）必须处于 ACTIVE，否则抛出 <code>StartupError</code>。</p>
+  <div class="body cols-2">
+    <div class="col">
+      <div class="chips" style="gap:12px">
+        <span class="chip" style="font-size:20px">agent-loop</span><span class="chip" style="font-size:20px">tool-executor-native</span><span class="chip" style="font-size:20px">tool-executor-ptc</span>
+        <span class="chip teal" style="font-size:20px">webserver</span><span class="chip teal" style="font-size:20px">web-runtime</span><span class="chip teal" style="font-size:20px">modules</span><span class="chip teal" style="font-size:20px">connection</span>
+        <span class="chip violet" style="font-size:20px">headless-runner</span><span class="chip amber" style="font-size:20px">acp</span><span class="chip coral" style="font-size:20px">sdk-jsonrpc-server</span>
+      </div>
+      <div class="diagram" data-mmd style="flex:1;height:auto"><script type="text/x-mermaid">
+flowchart LR
+  A["Loader 落定"] --> B{"根 Include 与<br/>必需的行都激活？"}
+  B -- "是" --> C["boot() 返回 ctx<br/>可选行失败只警告一次"]
+  B -- "否" --> E["抛出 StartupError<br/>报告存入 DSH_HOME/logs<br/>退出码 1"]:::bad
+  classDef good fill:#E6F5EC,stroke:#2E9461,color:#0F1115
+  classDef bad fill:#FDEBEA,stroke:#CF4F45,color:#0F1115
+  class C good
+</script></div>
+    </div>
+    <div class="col">
+      <div class="row-label">诊断格式示意（按 startupDiagnostic() 的格式构造）</div>
+      <pre class="term" style="font-size:19px"><span class="o">dsh: startup failed: 1 required plugin did not activate</span>
+
+<span class="h">Plugins waiting for services (1):</span>
+  Plugin                      Missing services
+  headless-runner (required)  headlessStartup</pre>
+      <ul class="points">
+        <li>诊断分两组：<b>启动失败的插件</b>（带错误栈）和<b>还在等待服务的插件</b>（列出缺少的服务）</li>
+        <li>非必需的行失败时，兄弟插件照常运行</li>
+        <li><code>installFailLoud()</code> 在 <code>boot()</code> 之前安装：任何时刻的未处理异常都会写诊断，在 2 秒上限内销毁插件树，再以退出码 1 结束</li>
+      </ul>
+    </div>
+  </div>
+  <div class="src">源码：<a href="../packages/boot/app-boot/src/index.ts" target="_blank">app-boot/src/index.ts</a>（requiredStartupEntryIds、startupDiagnostic、auditStartupEntries、installFailLoud） · <a href="../apps/cli/src/startup-diagnostics.ts" target="_blank">cli/src/startup-diagnostics.ts</a></div>
+</section>
+
+<section class="slide" data-title="应用插件接管进程" data-section="01 启动">
+  <div class="kicker">01 · 启动</div>
+  <h2>boot() 返回后，应用插件接管进程</h2>
+  <div class="body dt">
+    <div class="diagram" data-mmd><script type="text/x-mermaid">
+flowchart LR
+  B0["boot() 返回<br/>启动器不再主动做事"] --> H["headless<br/>headless-runner"]
+  B0 --> W["web<br/>webserver · web-runtime · modules · connection"]
+  B0 --> S["sdk 与 sdk-minimal<br/>sdk-jsonrpc-server"]
+  B0 --> A["acp<br/>acp"]
+  H --> H2["执行一个任务后退出"]
+  W --> W2["HTTP 服务<br/>浏览器端插件树"]
+  S --> S2["SDK 的 JSON-RPC 服务端"]
+  A --> A2["仅供自动化的 ACP 服务端"]
+  classDef hot fill:#4176E6,stroke:#283142,color:#ffffff
+  class B0 hot
+</script></div>
+    <div class="col">
+      <ul class="points sm">
+        <li>应用插件读取 <code>ctx.cmdlineArgs</code>，自己解析参数、打印帮助</li>
+        <li>web：<code>web-startup</code> 提供 <code>webStartup</code> 服务，服务器类的行 <code>inject</code> 它；<code>--help</code> 不提供该服务，所以不会绑定端口</li>
+        <li>浏览器端插件清单来自 <code>dsh.client</code> 行，由 <code>modules</code> 行写入 <code>window.__DSH_BOOT__</code></li>
+        <li>Web 会话由浏览器请求创建</li>
+      </ul>
+    </div>
+  </div>
+  <div class="src">源码：<a href="../packages/bundle/web-app/cordis.patch.yml" target="_blank">bundle/web-app/cordis.patch.yml</a> · <a href="../packages/bundle/headless/cordis.patch.yml" target="_blank">bundle/headless/cordis.patch.yml</a> · <a href="../packages/bundle/sdk-app/cordis.patch.yml" target="_blank">bundle/sdk-app</a> · <a href="../packages/bundle/acp-app/cordis.patch.yml" target="_blank">bundle/acp-app</a></div>
+</section>
+
+<section class="slide" data-title="headless 一次运行" data-section="01 启动">
+  <div class="kicker">01 · 启动</div>
+  <h2>headless：命令行如何变成一次 Agent 运行</h2>
+  <div class="body dt">
+    <div class="diagram" data-mmd><script type="text/x-mermaid">
+%%{init: {"flowchart": {"rankSpacing": 26, "nodeSpacing": 26}}}%%
+flowchart TD
+  A["headless-startup 解析 cmdlineArgs<br/>提供 headlessStartup 服务"] --> B["headless-runner 激活<br/>!!js 求值 · 等待 loader.await()"]
+  B --> C["校验权限参数，读取任务<br/>参数或 stdin"]
+  C --> F{"--session-id?"}
+  F -->|没有| G["ctx.agents.create()"]
+  F -->|有| G2["接管已存储的 Session"]
+  G --> I["followup(任务)<br/>等待 whenIdle 与子 Agent"]
+  G2 --> I
+  I --> K["flush 落盘<br/>completed 退出码 0，否则 1"]
+</script></div>
+    <div class="col">
+      <pre class="code" style="font-size:15.5px"><span class="tc"># dsh-headless 的补丁（节选）</span>
+- <span class="tk">insert</span>:
+    - <span class="tk">id</span>: headless-startup
+      <span class="tk">name</span>: <span class="ts">'@deepseek-ai/dsh-headless/startup'</span>
+    - <span class="tk">id</span>: headless-runner
+      <span class="tk">name</span>: <span class="ts">'@deepseek-ai/dsh-headless'</span>
+      <span class="tk">inject</span>: [headlessStartup]
+      <span class="tk">config</span>:
+        <span class="tk">task</span>: <span class="tf">!!js</span> ctx.headlessStartup.task</pre>
+      <div class="callout">行声明了 <code>inject</code>，Loader 就会等服务出现后再对 <code>!!js</code> 求值并启动插件。</div>
+    </div>
+  </div>
+  <div class="src">源码：<a href="../packages/bundle/headless/src/index.ts" target="_blank">bundle/headless/src/index.ts</a>（run、apply）· <a href="../packages/bundle/headless/cordis.patch.yml" target="_blank">bundle/headless/cordis.patch.yml</a></div>
+</section>
+
+<section class="slide" data-title="动手验证" data-section="01 启动">
+  <div class="kicker">01 · 启动</div>
+  <h2>动手验证：不需要 API key 就能看到插件树</h2>
+  <div class="body" style="grid-template-columns:1.25fr .75fr;grid-template-rows:auto auto 1fr;gap:16px 28px">
+    <pre class="term"><span class="p">$</span> pnpm install                <span class="o"># 首次运行前</span>
+<span class="p">$</span> export DSH_HOME="$(mktemp -d)" <span class="o"># 不改动真实的 ~/.dsh</span>
+<span class="p">$</span> pnpm dsh --profile headless --dump-config
+<span class="p">$</span> pnpm dsh --profile headless --patch my.yml --dump-config
+<span class="p">$</span> pnpm dsh --profile headless --help
+<span class="p">$</span> pnpm dsh --profile headless "run the tests"
+<span class="o">  # 最后一条会真正执行任务，需要 DEEPSEEK_API_KEY</span></pre>
+    <div class="col">
+      <div class="row-label" style="margin:0">my.yml</div>
+      <pre class="code">- <span class="tk">id</span>: sandbox-policy
+  <span class="tk">config</span>:
+    <span class="tk">mode</span>: read-only
+- <span class="tk">id</span>: tool-web
+  <span class="tk">disabled</span>: <span class="tn">true</span></pre>
+    </div>
+    <div class="row-label" style="grid-column:1 / -1;margin:0">--dump-config 的输出（实测）</div>
+    <pre class="term" style="grid-column:1 / -1;align-self:start"><span class="h"># == @deepseek-ai/dsh-base, patched by @deepseek-ai/dsh-headless, /path/to/my.yml</span>
+- id: sandbox-policy
+  name: '@deepseek-ai/dsh-sandbox-policy'
+  config:
+    mode: read-only        <span class="o"># config 被整体替换，原来的 workspaceRoot 消失</span>
+  inject:
+    - headlessStartup      <span class="o"># headless 层加的 inject 保留</span></pre>
+  </div>
+</section>
+
+<section class="slide divider" id="sec-plugins" data-title="02 插件加载" data-section="02 插件加载">
+  <div class="num">02</div>
+  <div class="kicker">Section 02</div>
+  <h2>插件加载：Cordis、Loader 与 Profile 分层</h2>
+  <div class="q">插件如何被组合、加载、替换和撤销？</div>
+  <div class="subs"><span>三层加载栈</span><span>Cordis 核心概念</span><span>事件派发</span><span>Fiber 与依赖 epoch</span><span>YAML 行的一生</span><span>补丁层叠</span><span>包解析</span><span>热重载</span><span>Agent 作用域</span></div>
+</section>
+
+<section class="slide" data-title="三层加载栈" data-section="02 插件加载">
+  <div class="kicker">02 · 插件加载</div>
+  <h2>插件加载分三层</h2>
+  <p class="lead">dsh 没有“内核 + 插件”的区分：进程里的所有能力都是插件，加载机制就是整个系统的骨架。</p>
+  <div class="body full">
+    <div class="stack">
+      <div class="layer"><h3>app-boot<small>dsh 自己的启动库</small></h3><p>profile 与 bundle、补丁层叠、包解析拦截、兼容性检查、启动审计、fail-loud</p><div class="where">packages/boot/app-boot</div></div>
+      <div class="layer l2"><h3>Loader + Include<small>vendored Cordis 插件</small></h3><p>把 YAML 行变成插件实例；应用补丁；求值 <code>!!js</code>；配置变更时只重启受影响的行</p><div class="where">vendor/loader · vendor/include</div></div>
+      <div class="layer l3"><h3>Cordis 运行时<small>vendored 框架核心</small></h3><p>Context 服务容器、类型化事件、Fiber 生命周期、可撤销的 effect</p><div class="where">vendor/cordis</div></div>
+    </div>
+  </div>
+  <div class="src">源码：<a href="../vendor/cordis/src/context.ts" target="_blank">vendor/cordis/src</a> · <a href="../vendor/loader/src/config/entry.ts" target="_blank">vendor/loader/src/config/entry.ts</a> · <a href="../vendor/include/src/patch.ts" target="_blank">vendor/include/src/patch.ts</a> · <a href="../packages/boot/app-boot/README.md" target="_blank">app-boot README</a></div>
+</section>
+
+<section class="slide" data-title="Cordis 五个核心概念" data-section="02 插件加载">
+  <div class="kicker">02 · 插件加载</div>
+  <h2>Cordis 的五个核心概念</h2>
+  <div class="body" style="grid-template-columns:repeat(5, 1fr)">
+    <div class="card c-blue"><h3>插件</h3><p>导出 <code>apply(ctx, config)</code> 的模块，可附带 <code>name</code>、<code>inject</code>、<code>Config</code>；或者一个 <code>Service</code> 子类。</p></div>
+    <div class="card c-teal"><h3>Context</h3><p>服务仓库：服务占用 <code>ctx.tools</code>、<code>ctx.llm</code> 这样的 key，使用方按 key 取，不 import 实现。</p></div>
+    <div class="card c-violet"><h3>inject</h3><p>声明依赖的服务；服务全部就绪前插件不运行。加载顺序由依赖表达，不靠手工排序。</p></div>
+    <div class="card c-amber"><h3>类型化事件</h3><p>通过 declaration merging 声明事件，按 emit、waterfall、parallel、serial、bail 五种模式派发。</p></div>
+    <div class="card c-coral"><h3>effect</h3><p>注册即可撤销：<code>ctx.effect()</code> 与 <code>ctx.on()</code> 返回 disposer，插件卸载时自动撤销。</p></div>
+  </div>
+  <div class="callout" style="margin-top:24px">读法：<b>Context 是“谁提供什么”</b>，<b>inject 是“我需要什么”</b>，<b>事件是“我们怎么协作”</b>，<b>effect 是“我走后不留痕迹”</b>。</div>
+  <div class="src">参考：<a href="../docs/cordis-primer.md" target="_blank">docs/cordis-primer.md</a></div>
+</section>
+
+<section class="slide" data-title="一个真实的最小插件" data-section="02 插件加载">
+  <div class="kicker">02 · 插件加载</div>
+  <h2>一个真实的最小插件：timeout-policy</h2>
+  <div class="body" style="grid-template-columns:1.25fr .75fr">
+    <div class="col">
+    <pre class="code" style="font-size:19.5px"><span class="tk">import type</span> { Context } <span class="tk">from</span> <span class="ts">'@deepseek-ai/cordis'</span>
+
+<span class="tk">export const</span> name = <span class="ts">'timeout-policy'</span>            <span class="tc">// ①</span>
+<span class="tk">export const</span> inject = [<span class="ts">'tools'</span>]                 <span class="tc">// ②</span>
+
+<span class="tk">export function</span> <span class="tf">apply</span>(ctx: Context): <span class="tk">void</span> {
+  ctx.<span class="tf">on</span>(<span class="ts">'tools/execute'</span>, <span class="tk">async</span> (exec, next) =&gt; { <span class="tc">// ③</span>
+    <span class="tk">const</span> timeoutMs = ctx.tools.<span class="tf">get</span>(exec.name, exec.agent)?.timeoutMs
+    <span class="tk">if</span> (timeoutMs === <span class="tk">undefined</span>) <span class="tk">return</span> <span class="tf">next</span>()    <span class="tc">// ④</span>
+    <span class="tc">// 给 exec.signal 加上超时，再调用 next()</span>
+    <span class="tc">// 若本插件的计时器触发，把结果改写为 TOOL_TIMEOUT</span>
+  })
+}</pre>
+      <div class="row-label" style="margin:4px 0 -8px">dsh-base 中挂载它的那一行（包名与插件的 <code>name</code> 不同）</div>
+      <pre class="code" style="font-size:19.5px">- <span class="tk">id</span>: timeout-policy
+  <span class="tk">name</span>: <span class="ts">'@deepseek-ai/dsh-tool-call-timeout-policy'</span></pre>
+    </div>
+    <div class="col">
+      <div class="step"><span class="no">1</span><div><b>name</b><p>Loader 诊断里显示的插件名</p></div></div>
+      <div class="step"><span class="no">2</span><div><b>inject</b><p><code>ctx.tools</code> 出现前插件停在 PENDING</p></div></div>
+      <div class="step"><span class="no">3</span><div><b>ctx.on</b><p>注册即 effect，插件卸载时监听自动移除</p></div></div>
+      <div class="step"><span class="no">4</span><div><b>next()</b><p>waterfall 链：不处理就交给下一个监听者</p></div></div>
+    </div>
+  </div>
+  <div class="src">源码：<a href="../packages/guard/timeout-policy/src/index.ts" target="_blank">packages/guard/timeout-policy/src/index.ts</a>（上面为精简版）· <a href="../packages/bundle/base/cordis.patch.yml" target="_blank">dsh-base 的 timeout-policy 行</a></div>
+</section>
+
+<section class="slide" data-title="事件派发模式与 waterfall" data-section="02 插件加载">
+  <div class="kicker">02 · 插件加载</div>
+  <h2>事件的五种派发模式</h2>
+  <div class="body" style="grid-template-columns:1.05fr .95fr">
+    <div class="col">
+      <table class="tbl">
+        <tr><th>模式</th><th>await</th><th>顺序</th><th>返回值</th><th>本仓库中的例子</th></tr>
+        <tr><td><code>emit</code></td><td>否</td><td>注册顺序</td><td>否</td><td>tools/result、agent/assistant-stream</td></tr>
+        <tr><td><code>waterfall</code></td><td>否</td><td>经 next() 串联</td><td>是</td><td>tools/pre-execute、agent/pre-step、llm/stream</td></tr>
+        <tr><td><code>parallel</code></td><td>是</td><td>并行</td><td>否</td><td>—</td></tr>
+        <tr><td><code>serial</code></td><td>是</td><td>注册顺序</td><td>是</td><td>agent/turn-stopping</td></tr>
+        <tr><td><code>bail</code></td><td>否</td><td>直到有人返回值</td><td>是</td><td>—</td></tr>
+      </table>
+      <div class="callout warn">规则：只做观察或标注的 waterfall 监听者<b>必须</b>调用 <code>next()</code>；只有拥有该决策的策略监听者才可以短路。</div>
+    </div>
+    <div class="diagram" data-mmd><script type="text/x-mermaid">
+sequenceDiagram
+  participant D as 派发方
+  participant A as 监听者 A
+  participant B as 监听者 B
+  participant F as 默认值
+  D->>A: waterfall(exec)
+  A->>A: 改写请求
+  A->>B: next()
+  B->>F: next()
+  F-->>B: allow
+  B-->>A: allow
+  A-->>D: allow 或改为 deny
+  Note over A,B: 不调用 next() 就短路
+</script></div>
+  </div>
+  <div class="src">参考：<a href="../docs/cordis-primer.md" target="_blank">docs/cordis-primer.md</a>（Dispatch Modes、Waterfall Semantics）· <a href="../packages/core/tools/src/events.ts" target="_blank">packages/core/tools/src/events.ts</a></div>
+</section>
+
+<section class="slide" data-title="Fiber 状态机" data-section="02 插件加载">
+  <div class="kicker">02 · 插件加载</div>
+  <h2>Fiber：插件实例的六种状态</h2>
+  <div class="body dt">
+    <div class="diagram" data-mmd><script type="text/x-mermaid">
+stateDiagram-v2
+  [*] --> PENDING: ctx.plugin()
+  PENDING --> LOADING: 依赖就绪
+  LOADING --> ACTIVE: apply 完成
+  LOADING --> FAILED: 抛错
+  ACTIVE --> UNLOADING: 依赖变化或卸载
+  UNLOADING --> LOADING: 依赖换新
+  UNLOADING --> PENDING: 等待依赖
+  UNLOADING --> DISPOSED: 被移除
+  FAILED --> LOADING: update() 重试
+  DISPOSED --> [*]
+</script></div>
+    <div class="col">
+      <ul class="points sm">
+        <li>每次 <code>ctx.plugin(plugin, config)</code> 创建一个 Fiber</li>
+        <li>Fiber 管理依赖、原始配置与生效配置、effect 清理</li>
+        <li>状态变化发出 <code>internal/status</code>；进出 ACTIVE 时通知依赖它所提供服务的插件</li>
+        <li><code>FAILED</code> 只能通过 <code>update()</code> 清除错误后恢复</li>
+      </ul>
+    </div>
+  </div>
+  <div class="src">源码：<a href="../vendor/cordis/src/fiber.ts" target="_blank">vendor/cordis/src/fiber.ts</a>（FiberState、Fiber）</div>
+</section>
+
+<section class="slide" data-title="依赖 epoch" data-section="02 插件加载">
+  <div class="kicker">02 · 插件加载</div>
+  <h2>依赖 epoch：为什么配置行的顺序无关</h2>
+  <div class="body dt">
+    <div class="diagram" data-mmd><script type="text/x-mermaid">
+sequenceDiagram
+  participant P1 as 服务实现 v1
+  participant R as Context 服务表
+  participant D as 依赖它的插件
+  participant P2 as 服务实现 v2
+  P1->>R: 提供 tools，uid = 7
+  R-->>D: 依赖到齐，epoch = 0:7
+  D->>D: LOADING 然后 ACTIVE
+  Note over P1,P2: 热重载替换实现
+  P1->>R: 撤销 tools
+  R-->>D: epoch 变为 INACTIVE
+  D->>D: UNLOADING，撤销全部 effect
+  P2->>R: 提供 tools，uid = 9
+  R-->>D: epoch = 0:9
+  D->>D: 自动重新加载
+</script></div>
+    <div class="col">
+      <div class="callout"><code>_refresh()</code>：epoch = 自身修订号 + 每个 inject 服务当前实现的 uid；任一依赖缺失则为 <code>INACTIVE</code>。</div>
+      <ul class="points sm">
+        <li>从 <code>INACTIVE</code> 变为可用 → 加载；其他变化 → 先卸载，epoch 仍可用就按新依赖重新加载</li>
+        <li>卸载有顺序保证：服务提供者要等所有依赖者卸载完毕，才撤销自己的 effect</li>
+        <li>结果：YAML 行顺序没有加载语义，替换任何服务实现都会自动级联重载</li>
+      </ul>
+    </div>
+  </div>
+  <div class="src">源码：<a href="../vendor/cordis/src/fiber.ts" target="_blank">vendor/cordis/src/fiber.ts</a>（_refresh、_setEpoch、_unload、_reload）</div>
+</section>
+
+<section class="slide" data-title="一行 YAML 的一生" data-section="02 插件加载">
+  <div class="kicker">02 · 插件加载</div>
+  <h2>一行 YAML 的一生</h2>
+  <div class="body" style="grid-template-columns:1.5fr .7fr">
+    <div class="diagram" data-mmd><script type="text/x-mermaid">
+%%{init: {"flowchart": {"rankSpacing": 26, "nodeSpacing": 28}}}%%
+flowchart TD
+  y["YAML 行经 Include 应用补丁<br/>id · name · config · disabled · inject"] --> dis{"disabled?<br/>以 Loader ctx 求值"}
+  dis -->|是| skip["不运行"]
+  dis -->|否| imp["import(name) → unwrapExports()<br/>registry.plugin() 创建 Fiber"]
+  imp --> pend["PENDING<br/>等待 inject 的服务"]
+  pend --> act["config 的 !!js 以插件 ctx 求值<br/>apply(ctx, config) → ACTIVE"]
+  act -.->|配置变更| upd["Entry.update()<br/>只改 volatile 字段时不重启"]
+</script></div>
+    <div class="col">
+      <div class="card"><h3><code>!!js</code> 的规则</h3><p>只有 <code>config</code> 和 <code>disabled</code> 支持表达式；其他元数据保持字面值。</p></div>
+      <div class="card"><h3>按环境启停</h3><p><code>disabled: !!js "!ctx.get('profileContext')"</code> 让 settings、plugin-manager、hmr 只在 dsh 启动器下运行。</p></div>
+    </div>
+  </div>
+  <div class="src">源码：<a href="../vendor/loader/src/config/entry.ts" target="_blank">vendor/loader/src/config/entry.ts</a>（EntryOptions、_resolveDisabled、update、_init）</div>
+</section>
+
+<section class="slide" data-title="补丁层叠" data-section="02 插件加载">
+  <div class="kicker">02 · 插件加载</div>
+  <h2>补丁层叠：从空列表到完整插件树</h2>
+  <div class="body" style="grid-template-rows:auto 1fr">
+    <div class="diagram" data-mmd style="height:auto;min-height:250px"><script type="text/x-mermaid">
+flowchart LR
+  root["空根<br/>cordis.yml"] --> b1["dsh-base<br/>insert"]
+  b1 --> b2["模式 bundle<br/>web-app 等"]
+  b2 --> pp["profile 补丁"]
+  pp --> hp["home 补丁"]
+  hp --> ov["--patch 文件"]
+  ov --> tel["遥测开关"]
+</script></div>
+    <div class="cols-2" style="display:grid;gap:24px;min-height:0">
+      <div class="col">
+        <div class="row-label">insert：插入新行（dsh-base）</div>
+        <pre class="code" style="font-size:15px">- <span class="tk">insert</span>:
+    - <span class="tk">id</span>: sandbox-policy
+      <span class="tk">name</span>: <span class="ts">'@deepseek-ai/dsh-sandbox-policy'</span>
+      <span class="tk">config</span>:
+        <span class="tk">mode</span>: <span class="tf">!!js</span> process.env.DSH_PERMISSION_MODE ?? <span class="ts">'workspace-write'</span>
+        <span class="tk">workspaceRoot</span>: <span class="tf">!!js</span> process.cwd()</pre>
+      </div>
+      <div class="col">
+        <div class="row-label">按 id 覆盖：config 整体替换，不做深合并</div>
+        <pre class="code">- <span class="tk">id</span>: sandbox-policy
+  <span class="tk">config</span>:
+    <span class="tk">mode</span>: read-only      <span class="tc"># workspaceRoot 随之消失</span>
+- <span class="tk">id</span>: tool-web
+  <span class="tk">disabled</span>: <span class="tn">true</span></pre>
+        <div class="callout">home 补丁高于 profile 补丁；<code>DSH_TELEMETRY_DISABLED</code> 的任何非空值都关闭遥测。</div>
+      </div>
+    </div>
+  </div>
+  <div class="src">源码：<a href="../packages/boot/app-boot/src/profile-context.ts" target="_blank">app-boot/src/profile-context.ts</a>（readProfilePatches、resolveTelemetryPatch）· <a href="../vendor/include/src/patch.ts" target="_blank">vendor/include/src/patch.ts</a></div>
+</section>
+
+<section class="slide" data-title="dsh-base 的 101 行" data-section="02 插件加载">
+  <div class="kicker">02 · 插件加载</div>
+  <h2>dsh-base：101 行插件，横跨 36 个分组</h2>
+  <div class="body dt">
+    <div class="diagram" data-mmd><script type="text/x-mermaid">
+pie showData
+  title dsh-base 插入的插件行（按包分组）
+  "session" : 9
+  "llm" : 8
+  "core" : 8
+  "subagent" : 6
+  "shell" : 5
+  "web" : 5
+  "boot" : 4
+  "interaction" : 4
+  "fs" : 4
+  "goal" : 4
+  "compaction" : 4
+  "其余 25 个分组" : 40
+</script></div>
+    <div class="col">
+      <ul class="points sm">
+        <li><code>web</code>、<code>headless</code>、<code>sdk</code>、<code>acp</code> 四个 profile 共用 dsh-base 作为第一层</li>
+        <li>模型、工具、持久化、沙箱与审批、设置、凭据、遥测都在这一层</li>
+        <li>会因模式而不同的配置不放在 base，由模式 bundle 写完整</li>
+        <li>完整清单见生成的 <code>apps/cli/composition.md</code></li>
+      </ul>
+    </div>
+  </div>
+  <div class="src">数据：<a href="../apps/cli/composition.md" target="_blank">apps/cli/composition.md</a> 的 101 行，按包所在的 packages/&lt;group&gt; 统计（vendored 的 timer 计为 vendor）</div>
+</section>
+
+<section class="slide" data-title="插件包从哪里来" data-section="02 插件加载">
+  <div class="kicker">02 · 插件加载</div>
+  <h2>插件包从哪里来</h2>
+  <div class="body cols-3">
+    <div class="card c-blue">
+      <h3>① bundle 的位置</h3>
+      <p><code>resolveBundleDir()</code> 先查 dsh 安装目录，再查 profile 目录。</p>
+      <div class="callout" style="margin-top:16px">所以 <code>dsh-base</code> 等内置 bundle 总是来自当前运行的这份安装，不会被 profile 里的旧副本顶替。</div>
+    </div>
+    <div class="card c-teal">
+      <h3>② 模块解析</h3>
+      <p><code>PluginPackages</code> 在内存中拦截 Node 的 <b>ESM</b> 与 <b>CommonJS</b> 解析器，并让 <b>Worker</b> 线程看到同一张包表。</p>
+      <div class="callout ok" style="margin-top:16px">包表在任何插件被 import 前算好且不可变；profile 重新组合时发布完整的后继版本。不写符号链接。</div>
+    </div>
+    <div class="card c-violet">
+      <h3>③ 兼容性检查</h3>
+      <p><code>evaluatePluginCompatibility()</code> 读取 <code>engines.dsh</code>（没有时读 dsh 的 peer 依赖），<b>不 import 插件代码</b>。</p>
+      <div class="callout warn" style="margin-top:16px">不兼容的 bundle 被跳过；可以用 <code>dsh plugin allow-version &lt;pkg@ver&gt; --dsh-version &lt;exact&gt; --accept-risk</code> 为精确版本登记豁免。</div>
+    </div>
+  </div>
+  <div class="src">源码：<a href="../packages/boot/app-boot/src/profile.ts" target="_blank">app-boot/src/profile.ts</a> · <a href="../packages/boot/app-boot/src/profile-resolution/service.ts" target="_blank">profile-resolution/service.ts</a> · <a href="../packages/boot/app-boot/src/plugin-compatibility.ts" target="_blank">plugin-compatibility.ts</a></div>
+</section>
+
+<section class="slide" data-title="安装、启停与热重载" data-section="02 插件加载">
+  <div class="kicker">02 · 插件加载</div>
+  <h2>安装、启停与热重载</h2>
+  <div class="body dt">
+    <div class="diagram" data-mmd><script type="text/x-mermaid">
+flowchart TB
+  cmd["dsh plugin add<br/>pnpm 安装到 profile"] --> rec["同步 dsh.profile.bundles"]
+  ui["Plugin Manager<br/>Web 界面与 agent 工具"] --> rec
+  rec --> recompose["重新组合 profile<br/>发布新的包解析表"]
+  yml["编辑 cordis.patch.yml"] --> hmr
+  recompose --> hmr["dsh-hmr 队列<br/>模块替换 · Include 刷新 · 配置变更"]
+  hmr --> up["Entry.update()<br/>只重启受影响的行"]
+  up --> ep["依赖者经 epoch 自动重载"]
+</script></div>
+    <div class="col">
+      <ul class="points sm">
+        <li>声明 <code>dsh.bundle.patch</code> 的包成为一个 profile 层；普通插件包需要在 <code>cordis.patch.yml</code> 里加一行</li>
+        <li>可选 bundle（<code>OPTIONAL_BUNDLES</code>）随安装包附带，默认关闭</li>
+        <li>dsh-base 默认开启只监听配置的 HMR（<code>root: []</code>）；headless、sdk、acp 关闭它</li>
+        <li>不开 HMR 时，修改要到下次启动才生效</li>
+      </ul>
+    </div>
+  </div>
+  <div class="src">源码：<a href="../apps/cli/src/plugin.ts" target="_blank">apps/cli/src/plugin.ts</a> · <a href="../packages/boot/plugin-manager/README.md" target="_blank">plugin-manager</a> · <a href="../packages/boot/hmr/README.md" target="_blank">dsh-hmr</a></div>
+</section>
+
+<section class="slide" data-title="每个 Agent 一套插件" data-section="02 插件加载">
+  <div class="kicker">02 · 插件加载</div>
+  <h2>每个 Agent 一套插件：作用域与 Agent Preset</h2>
+  <div class="body dt">
+    <div class="diagram" data-mmd><script type="text/x-mermaid">
+flowchart TB
+  root["根 Context<br/>全局服务：ctx.tools · ctx.llm · ctx.sessions · ctx.agents"]
+  root --> a1["Agent A 的 agent.ctx<br/>preset：standard"]
+  root --> a2["Agent B 的 agent.ctx<br/>preset：ptc"]
+  a1 --> t1["作用域内注册<br/>工具 · 提示词片段 · 监听者"]
+  a2 --> t2["作用域内注册<br/>tool-executor-ptc 与 run_code"]
+  t1 -.->|"Agent 销毁时"| x1["全部撤销"]
+  t2 -.->|"Agent 销毁时"| x2["全部撤销"]
+</script></div>
+    <div class="col">
+      <ul class="points sm">
+        <li>在 <code>agent.ctx</code> 上注册的内容只对该 Agent 可见</li>
+        <li>带作用域的事件经 <code>scopeTarget()</code> 路由：Agent 作用域内的 <code>tools/pre-execute</code> 监听者只收到这个 Agent 的调用</li>
+        <li>同名提示词片段：最近的作用域优先，同一作用域内最新注册优先</li>
+        <li>Agent Preset 的 <code>config.plugins</code> 本身就是一段 Cordis YAML；Web 提供 standard、minimal、ptc、cordis 四个预设</li>
+        <li>预设内的服务行需要 <code>isolate</code> 域</li>
+      </ul>
+    </div>
+  </div>
+  <div class="src">源码：<a href="../packages/core/scope/src/index.ts" target="_blank">packages/core/scope/src/index.ts</a> · <a href="../packages/bundle/web-app/presets/standard.patch.yml" target="_blank">bundle/web-app/presets/</a> · <a href="../packages/preset/agent-preset/README.md" target="_blank">agent-preset</a></div>
+</section>
+
+<section class="slide divider" id="sec-perm" data-title="03 权限控制" data-section="03 权限控制">
+  <div class="num">03</div>
+  <div class="kicker">Section 03</div>
+  <h2>权限控制：沙箱、审批与预设</h2>
+  <div class="q">谁能写哪些文件？什么时候需要人来批准？</div>
+  <div class="subs"><span>权限模型</span><span>三种沙箱模式</span><span>权限组合</span><span>工具执行管线</span><span>沙箱升级</span><span>审批结果</span><span>子 Agent</span><span>速查表</span></div>
+</section>
+
+<section class="slide" data-title="权限模型总览" data-section="03 权限控制">
+  <div class="kicker">03 · 权限控制</div>
+  <h2>两个旋钮，加上工具管线里的检查点</h2>
+  <div class="body td">
+    <div class="col">
+      <div class="callout ok" style="font-size:22px"><b>默认不逐次审批。</b>命令和文件写入先在沙箱里执行；只有模型主动申请越过沙箱（<code>sandbox_permissions</code>）时，才请人或自动化流程做一次性批准。</div>
+      <ul class="points sm">
+        <li><b>沙箱模式</b> <code>sandbox/mode</code>：命令和文件工具能产生什么文件副作用</li>
+        <li><b>审批策略</b> <code>approval/policy</code>：需要批准的操作是去问，还是直接拒绝</li>
+        <li><b>权限预设</b>：把两个旋钮打包成一个可选的“权限模式”</li>
+        <li>两个旋钮都以 Session 事件保存，重启和回放后依然有效</li>
+      </ul>
+    </div>
+    <div class="diagram" data-mmd><script type="text/x-mermaid">
+flowchart TB
+  preset["权限预设"] -->|写入| mode["沙箱模式<br/>sandbox/mode"]
+  preset -->|写入| policy["审批策略<br/>approval/policy"]
+  mode --> sp["ctx.sandboxPolicy.resolve()"]
+  sp --> bash["bash · pwsh<br/>ctx.sandbox"]
+  sp --> fs["文件工具<br/>fs-sandbox"]
+  sp --> ptc["PTC 子进程"]
+  policy --> appr["ctx.approval.request()"]
+  appr --> esc["沙箱升级审批"]
+  appr --> hook["pre-execute 返回 ask"]
+</script></div>
+  </div>
+  <div class="src">参考：<a href="../docs/subsystems/sandbox.md" target="_blank">sandbox.md</a> · <a href="../docs/subsystems/approval.md" target="_blank">approval.md</a> · <a href="../docs/subsystems/permission-presets.md" target="_blank">permission-presets.md</a></div>
+</section>
+
+<section class="slide" data-title="三种沙箱模式" data-section="03 权限控制">
+  <div class="kicker">03 · 权限控制</div>
+  <h2>三种沙箱模式：只管文件副作用</h2>
+  <div class="body" style="grid-template-rows:1fr auto">
+    <div class="cols-3" style="display:grid;gap:24px;min-height:0">
+      <div class="card c-green mode">
+        <div class="head"><code>read-only</code><span class="chip green">最严</span></div>
+        <div class="meter"><i style="width:12%;background:var(--green)"></i></div>
+        <p style="font-size:21px">不允许写入（POSIX runner 只放行 shell 必需的 <code>/dev/null</code>）。</p>
+        <p style="font-size:19px;color:var(--muted)">命令：经 <code>ctx.sandbox</code> 包装后执行<br>文件工具：一律拒绝（<code>FS_SANDBOX_DENIED</code>）<br>同名预设的审批策略：<code>ask</code></p>
+        <div class="tries"><div class="row-label">示例：写入这些路径</div>
+          <div><code>./src/app.ts</code><span class="chip coral">拒绝</span></div>
+          <div><code>/tmp/out.log</code><span class="chip coral">拒绝</span></div>
+          <div><code>~/.zshrc</code><span class="chip coral">拒绝</span></div>
+        </div>
+      </div>
+      <div class="card c-blue mode">
+        <div class="head"><code>workspace-write</code><span class="chip">默认</span></div>
+        <div class="meter"><i style="width:55%;background:var(--ds-500)"></i></div>
+        <p style="font-size:21px">可写：Session 工作目录、显式授予的额外目录、<code>/tmp</code> 与系统临时目录。</p>
+        <p style="font-size:19px;color:var(--muted)">命令：经 <code>ctx.sandbox</code> 包装后执行<br>文件工具：目标必须落在上述可写目录内<br>同名预设的审批策略：<code>ask</code></p>
+        <div class="tries"><div class="row-label">示例：写入这些路径</div>
+          <div><code>./src/app.ts</code><span class="chip green">允许</span></div>
+          <div><code>/tmp/out.log</code><span class="chip green">允许</span></div>
+          <div><code>~/.zshrc</code>（工作区外）<span class="chip coral">拒绝</span></div>
+        </div>
+      </div>
+      <div class="card c-coral mode">
+        <div class="head"><code>danger-full-access</code><span class="chip coral">不限制</span></div>
+        <div class="meter"><i style="width:100%;background:var(--coral)"></i></div>
+        <p style="font-size:21px">不限制文件写入。</p>
+        <p style="font-size:19px;color:var(--muted)">命令：直接执行原始 argv，不调用 <code>ctx.sandbox</code><br>文件工具：不限制修改<br>同名预设的审批策略：<code>never</code></p>
+        <div class="tries"><div class="row-label">示例：写入这些路径</div>
+          <div><code>./src/app.ts</code><span class="chip green">允许</span></div>
+          <div><code>/tmp/out.log</code><span class="chip green">允许</span></div>
+          <div><code>~/.zshrc</code><span class="chip green">允许</span></div>
+        </div>
+      </div>
+    </div>
+    <div class="cols-2" style="display:grid;gap:24px">
+      <div class="callout"><b>本机后端</b>（dsh-sandbox-local）：Linux 用 bwrap 与 Landlock，macOS 用 Seatbelt，Windows 用 ACL 受限令牌；每次执行报告 <code>full</code> 或 <code>partial</code>。</div>
+      <div class="callout bad"><b>fail-closed</b>：没有可用后端时返回 <code>SANDBOX_UNAVAILABLE</code>，绝不静默地不加沙箱执行。网络访问与进程可见性不在沙箱模式的范围内。</div>
+    </div>
+  </div>
+  <div class="src">源码：<a href="../packages/bundle/base/cordis.patch.yml" target="_blank">dsh-base 的 sandbox-policy 行</a> · <a href="../packages/sandbox/sandbox-policy/src/index.ts" target="_blank">sandbox-policy/src/index.ts</a> · <a href="../packages/sandbox/sandbox-local/README.md" target="_blank">sandbox-local</a> · <a href="../packages/fs/fs-sandbox/README.md" target="_blank">fs-sandbox</a></div>
+</section>
+
+<section class="slide" data-title="权限组合一览" data-section="03 权限控制">
+  <div class="kicker">03 · 权限控制</div>
+  <h2>权限组合一览：写入范围 × 越界时能否获批</h2>
+  <div class="body" style="grid-template-columns:1.1fr .9fr">
+    <div class="diagram" data-mmd><script type="text/x-mermaid">
+quadrantChart
+  x-axis 写入范围窄 --> 写入范围宽
+  y-axis 越界请求被拒 --> 越界可获批准
+  quadrant-1 宽且可获批准
+  quadrant-2 窄且可获批准
+  quadrant-3 窄且总被拒绝
+  quadrant-4 宽且从不询问
+  read-only 预设: [0.15, 0.88]
+  workspace-write 预设: [0.4, 0.7]
+  danger-full-access 预设: [0.8, 0.1]
+  headless 无应答者: [0.4, 0.3]
+  子 Agent: [0.5, 0.12]
+</script></div>
+    <div class="col">
+      <table class="tbl">
+        <tr><th>组合</th><th>沙箱模式</th><th>审批</th></tr>
+        <tr><td>read-only 预设</td><td>read-only</td><td>ask</td></tr>
+        <tr><td>workspace-write 预设</td><td>workspace-write</td><td>ask</td></tr>
+        <tr><td>danger-full-access 预设</td><td>不限制</td><td>never</td></tr>
+        <tr><td>headless（无应答者）</td><td>默认 workspace-write</td><td>ask → unavailable</td></tr>
+        <tr><td>子 Agent</td><td>继承父 Session 的显式设置</td><td>固定 never</td></tr>
+      </table>
+      <div class="callout">横轴是文件写入范围，纵轴是“模型申请越界时，有没有机会被批准”。</div>
+      <div class="callout bad"><code>ask</code> 要有应答者才可能获批：Web、SDK 服务端、ACP 桥会应答；headless 组合没有挂载应答者，所以 <code>ask</code> 得到 <code>unavailable</code>，即拒绝。</div>
+    </div>
+  </div>
+  <div class="src">源码：<a href="../packages/bundle/base/cordis.patch.yml" target="_blank">dsh-base 的 permission 行</a> · <a href="../packages/subagent/subagent/src/child-agent.ts" target="_blank">subagent/src/child-agent.ts</a></div>
+</section>
+
+<section class="slide" data-title="工具执行管线" data-section="03 权限控制">
+  <div class="kicker">03 · 权限控制</div>
+  <h2>工具执行管线中的权限检查点</h2>
+  <div class="body" style="grid-template-columns:1.25fr .85fr">
+    <div class="diagram" data-mmd><script type="text/x-mermaid">
+%%{init: {"flowchart": {"rankSpacing": 26, "nodeSpacing": 26}}}%%
+flowchart TD
+  call["tool-call<br/>Session 记录 tool/call"] --> pre["tools/pre-execute<br/>allow · deny · ask · cancel"]
+  pre -->|ask| appr["ctx.approval.request()"]
+  pre -->|allow| guards["单调守卫<br/>只能拒绝或弃权"]
+  appr -->|allowed-once| guards
+  appr -->|其他结果| denied["拒绝<br/>生成错误结果"]
+  pre -->|deny| denied
+  guards -->|deny| denied
+  guards -->|allow| body["tools/execute 包裹工具体<br/>超时 · checkpoint · 沙箱"]
+  body --> post["tools/post-execute<br/>finalizeContent"]
+  denied --> post
+  post --> result["tool/result<br/>模型可见"]
+  classDef bad fill:#FDEBEA,stroke:#CF4F45,color:#0F1115
+  class denied bad
+</script></div>
+    <div class="col">
+      <ul class="points sm">
+        <li><code>prepare()</code> 先把参数做成无损 JSON 快照并深冻结</li>
+        <li><code>tools/pre-execute</code> 的链尾默认是 <code>allow</code>；监听者包括 hook 桥接、auto-review 等</li>
+        <li><code>ask</code> 时没有审批服务或调用不属于任何 Agent，直接拒绝</li>
+        <li>单调守卫在审批之后检查，保护不能被 waterfall 监听者重排或绕过的策略</li>
+        <li>所有拒绝都变成模型可见的错误结果，不会以异常打断循环</li>
+      </ul>
+    </div>
+  </div>
+  <div class="src">源码：<a href="../packages/core/tools/src/pipeline.ts" target="_blank">core/tools/src/pipeline.ts</a>（prepare、serviceAsk、dispatch）· <a href="../packages/core/tools/src/index.ts" target="_blank">core/tools/src/index.ts</a>（guard、checkGuards）· <a href="../docs/tool-execution-pipeline.md" target="_blank">tool-execution-pipeline.md</a></div>
+</section>
+
+<section class="slide" data-title="沙箱升级" data-section="03 权限控制">
+  <div class="kicker">03 · 权限控制</div>
+  <h2>沙箱升级：越界才问，一次一批</h2>
+  <div class="body" style="grid-template-columns:1.35fr .65fr">
+    <div class="diagram" data-mmd><script type="text/x-mermaid">
+sequenceDiagram
+  participant M as 模型
+  participant B as bash 工具
+  participant S as ctx.sandbox
+  participant A as ctx.approval
+  participant H as 用户
+  M->>B: bash(command)
+  B->>S: 在 workspace-write 下执行
+  S-->>B: 被拒绝
+  B-->>M: 拒绝标记 + 升级提示
+  M->>B: 带 sandbox_permissions 重试
+  B->>B: 检查目标模式严格更宽
+  B->>A: request(升级理由)
+  A->>H: 显示审批
+  H-->>A: allowed-once
+  A-->>B: allowed-once
+  B->>B: 仅本次以更宽模式执行
+  B-->>M: 命令结果
+</script></div>
+    <div class="col">
+      <ul class="points sm">
+        <li>只有挂载了具备沙箱能力的后端时，工具 schema 才出现 <code>sandbox_permissions</code> 和 <code>justification</code></li>
+        <li>bash、pwsh、文件 write/edit、PTC、plugin-manager 工具共用 <code>approveEscalation()</code></li>
+        <li>目标模式必须<b>严格更宽</b>，否则报 <code>SANDBOX_ESCALATION_INVALID_ARGUMENT</code></li>
+        <li>用户拒绝时，返回文字要求模型停下来解释，不要绕道完成</li>
+        <li>批准只对这一次调用有效，Session 的沙箱模式不变</li>
+      </ul>
+    </div>
+  </div>
+  <div class="src">源码：<a href="../packages/sandbox/sandbox/src/escalation.ts" target="_blank">sandbox/src/escalation.ts</a>（approveEscalation、WIDER_MODES）· <a href="../packages/shell/tool-bash/src/index.ts" target="_blank">tool-bash</a> · <a href="../packages/fs/tool-fs/src/sandbox.ts" target="_blank">tool-fs/src/sandbox.ts</a></div>
+</section>
+
+<section class="slide" data-title="审批结果" data-section="03 权限控制">
+  <div class="kicker">03 · 权限控制</div>
+  <h2>审批：只有 allowed-once 才放行</h2>
+  <div class="body dt">
+    <div class="diagram" data-mmd><script type="text/x-mermaid">
+flowchart TB
+  req["ctx.approval.request()"] --> pol{"审批策略"}
+  pol -->|never| rej["rejected"]
+  pol -->|ask| chain["应答者链<br/>Web · SDK · ACP"]
+  chain -->|批准| ok["allowed-once"]
+  chain -->|拒绝| rej
+  chain -->|撤回| can["cancelled"]
+  chain -->|无应答者或出错| un["unavailable"]
+  ok --> run["只执行这一次"]
+  rej --> deny["调用方拒绝执行"]
+  can --> deny
+  un --> deny
+  req -.-> audit["approval/asked · approval/decided<br/>仅审计"]
+  classDef bad fill:#FDEBEA,stroke:#CF4F45,color:#0F1115
+  classDef good fill:#E6F5EC,stroke:#2E9461,color:#0F1115
+  class rej,can,un,deny bad
+  class ok,run good
+</script></div>
+    <div class="col">
+      <ul class="points sm">
+        <li>结果是封闭集合：<code>allowed-once</code>、<code>rejected</code>、<code>cancelled</code>、<code>unavailable</code></li>
+        <li>策略以 <code>approval/policy</code> 事件保存，只能经 <code>setApprovalPolicy()</code> 写入</li>
+        <li>dsh-base 默认：<code>danger-full-access</code> 时为 never，否则为 ask</li>
+        <li>请求只带 <code>callId</code>、不复制参数，UI 把审批挂到已显示的工具调用上</li>
+        <li>headless 没有应答者，<code>ask</code> 最终得到 <code>unavailable</code></li>
+      </ul>
+    </div>
+  </div>
+  <div class="src">源码：<a href="../packages/interaction/user-approval/src/index.ts" target="_blank">interaction/user-approval/src/index.ts</a> · <a href="../docs/subsystems/approval.md" target="_blank">approval.md</a></div>
+</section>
+
+<section class="slide" data-title="子 Agent 与其他边界" data-section="03 权限控制">
+  <div class="kicker">03 · 权限控制</div>
+  <h2>子 Agent 与其他边界</h2>
+  <div class="body" style="grid-template-rows:auto 1fr">
+    <div class="diagram" data-mmd style="height:auto;min-height:190px"><script type="text/x-mermaid">
+flowchart LR
+  parent["父 Session<br/>显式沙箱模式 · 审批策略 ask"] -->|"委派时同步捕获"| cap["captureDelegatedPolicyOverrides()"]
+  cap --> child["子 Session<br/>沙箱：继承父 Session 的显式设置<br/>审批：固定 never"]
+  child --> res["子 Agent 的越界请求<br/>被确定性拒绝"]
+  classDef bad fill:#FDEBEA,stroke:#CF4F45,color:#0F1115
+  class res bad
+</script></div>
+    <div class="cols-3" style="display:grid;gap:22px;min-height:0">
+      <div class="card c-teal"><h3>远程访问控制</h3><p><code>dsh-api-remote-access</code> 为非所有者的远程对端做方法级访问控制；Gateway 在解析查找、解码参数之前先询问它。</p></div>
+      <div class="card c-amber"><h3>凭据</h3><p>配置只引用键名（如 <code>DEEPSEEK_API_KEY</code>）。密钥存在仅当前 OS 用户可读的文件里，但 agent 的工具进程也以该用户运行，无法对 agent 隔离。</p></div>
+      <div class="card c-violet"><h3>Plan mode 不是强制手段</h3><p>它只引导模型先规划；所有工具仍然可用。真正的限制靠沙箱模式和审批。</p></div>
+    </div>
+  </div>
+  <div class="src">源码：<a href="../packages/subagent/subagent/src/child-agent.ts" target="_blank">subagent/src/child-agent.ts</a> · <a href="../packages/api/remote-access/README.md" target="_blank">remote-access</a> · <a href="../packages/credentials/credentials-local/README.md" target="_blank">credentials-local</a> · <a href="../packages/plan/plan-mode/README.md" target="_blank">plan-mode</a></div>
+</section>
+
+<section class="slide" data-title="权限速查表" data-section="03 权限控制">
+  <div class="kicker">03 · 权限控制</div>
+  <h2>权限速查表</h2>
+  <div class="body full">
+    <table class="tbl" style="font-size:22px;align-self:start">
+      <tr><th>场景</th><th>结果</th></tr>
+      <tr><td><code>workspace-write</code> 下 bash 在工作区内写文件</td><td><span class="chip green">允许</span></td></tr>
+      <tr><td>bash 写工作区外的文件</td><td><span class="chip amber">沙箱拒绝</span> 模型可以申请升级，等待一次性批准</td></tr>
+      <tr><td>没有可用的沙箱后端</td><td><span class="chip coral">SANDBOX_UNAVAILABLE</span> 不会无沙箱执行</td></tr>
+      <tr><td>审批策略为 ask，但没有应答者（如 headless）</td><td><span class="chip coral">unavailable</span> 按拒绝处理</td></tr>
+      <tr><td>审批策略为 never</td><td><span class="chip coral">rejected</span> 所有审批请求直接拒绝</td></tr>
+      <tr><td><code>danger-full-access</code> 预设</td><td><span class="chip">不调用 ctx.sandbox</span> 审批策略同时为 never</td></tr>
+      <tr><td>子 Agent</td><td><span class="chip violet">审批固定 never</span> 沙箱模式取委派时父 Session 的显式设置</td></tr>
+    </table>
+  </div>
+</section>
+
+<section class="slide divider" id="sec-conv" data-title="04 对话管理" data-section="04 对话管理">
+  <div class="num">04</div>
+  <div class="kicker">Section 04</div>
+  <h2>对话管理：Agent、Session 与 Agent Loop</h2>
+  <div class="q">一次对话如何被推进、记录、压缩、持久化和恢复？</div>
+  <div class="subs"><span>Agent 与 Session</span><span>事件日志</span><span>Surface</span><span>Agent Loop</span><span>Inbox</span><span>扩展点</span><span>上下文窗口</span><span>持久化</span><span>Fork 与子 Agent</span><span>投影</span></div>
+</section>
+
+<section class="slide" data-title="Agent 与 Session" data-section="04 对话管理">
+  <div class="kicker">04 · 对话管理</div>
+  <h2>Agent 负责推进，Session 负责记录</h2>
+  <div class="body dt">
+    <div class="diagram" data-mmd><script type="text/x-mermaid">
+flowchart TB
+  ui["UI · SDK · headless runner"] -->|"followup · steer · inject · cancel"| agent["Agent<br/>inbox 与状态"]
+  agent --> loop["agent-loop driver"]
+  loop -->|append| sess["Session 事件日志"]
+  sess -->|"deriveMessages()"| llm["ctx.llm<br/>模型请求"]
+  llm -->|流式块| loop
+  loop -->|执行工具| tools["ctx.tools"]
+  tools -->|tool/result| sess
+  sess -->|session/event| ui
+  sess --> persist[("JSONL 文件")]
+  classDef hot fill:#6C55E0,stroke:#283142,color:#ffffff
+  class sess hot
+</script></div>
+    <div class="col">
+      <ul class="points sm">
+        <li><code>ctx.agents.create()</code> 用给定的 <code>SessionId</code> 同时创建 Session 和 Agent；<code>resume()</code> 先加载已持久化的 Session</li>
+        <li>只有创建方持有的 <code>AgentHandle</code> 能 <code>dispose()</code> 这个 Agent</li>
+        <li><code>ctx.agents</code> 由 <code>dsh-agent</code> 定义；<code>dsh-agent-loop</code> 通过 <code>setFactory()</code> 把自己注册为工厂，扩展插件只依赖 <code>dsh-agent</code>，循环可以替换</li>
+      </ul>
+    </div>
+  </div>
+  <div class="src">源码：<a href="../packages/core/agent/src/runtime-types.ts" target="_blank">core/agent/src/runtime-types.ts</a> · <a href="../packages/core/agent-loop/src/index.ts" target="_blank">core/agent-loop/src/index.ts</a> · <a href="../docs/subsystems/core.md" target="_blank">core.md</a></div>
+</section>
+
+<section class="slide" data-title="Session 事件日志" data-section="04 对话管理">
+  <div class="kicker">04 · 对话管理</div>
+  <h2>Session：append-only 的事件日志</h2>
+  <p class="lead">一次带工具调用的 turn 在日志里的样子（示意）。<code>seq</code> 连续；非法事件在 <code>append()</code> 时就被拒绝。</p>
+  <div class="body" style="grid-template-rows:auto auto auto;align-content:start;gap:26px">
+    <div class="tape lg">
+      <span class="ev k-bound"><i>#0</i>turn/start</span>
+      <span class="ev k-bound"><i>#1</i>step/start</span>
+      <span class="ev k-surf"><i>#2</i>system/message</span>
+      <span class="ev k-surf"><i>#3</i>user/message</span>
+      <span class="ev k-surf"><i>#4</i>user/message · 运行时上下文</span>
+      <span class="ev k-meta"><i>#5</i>request/header</span>
+      <span class="ev k-meta"><i>#6</i>request/context</span>
+      <span class="ev k-surf"><i>#7</i>assistant/message · tool-call</span>
+      <span class="ev k-exec"><i>#8</i>tool/call</span>
+      <span class="ev k-surf"><i>#9</i>tool/result</span>
+      <span class="ev k-bound"><i>#10</i>step/end</span>
+      <span class="ev k-bound"><i>#11</i>step/start</span>
+      <span class="ev k-surf"><i>#12</i>assistant/message</span>
+      <span class="ev k-bound"><i>#13</i>step/end</span>
+      <span class="ev k-bound"><i>#14</i>turn/end · completed</span>
+    </div>
+    <div class="legend">
+      <span><i style="background:#F1F3F7"></i>回合边界</span>
+      <span><i style="background:var(--ds-50);border-color:var(--ds-300)"></i>Surface：进入模型历史</span>
+      <span><i style="background:var(--amber-50)"></i>请求元数据：用于重建请求</span>
+      <span><i style="background:var(--teal-50)"></i>执行记录</span>
+      <span><i style="background:var(--violet-50)"></i>插件扩展：sandbox/mode · approval/* · compaction/* …</span>
+    </div>
+    <div class="cols-2" style="display:grid;gap:24px;min-height:0">
+      <div class="callout"><b>append() 的契约</b>：数据必须是无损 JSON，提交前做快照并深冻结、校验事件与 Surface 规则；提交后同步通知观察者，单个监听者出错被隔离；热路径不等 I/O。</div>
+      <div class="callout"><b>turn/end 的原因</b>：<code>completed</code> · <code>max-tokens</code> · <code>blocked</code> · <code>aborted</code> · <code>error</code> · <code>interrupted</code>（崩溃后补写）· <code>forked</code>（fork 种子补写）</div>
+    </div>
+  </div>
+  <div class="src">源码：<a href="../packages/core/session/src/index.ts" target="_blank">core/session/src/index.ts</a>（Session、append）· <a href="../packages/core/session/src/types.ts" target="_blank">core/session/src/types.ts</a>（SessionEventMap、TurnEndReasonMap）</div>
+</section>
+
+<section class="slide" data-title="65 种事件类型" data-section="04 对话管理">
+  <div class="kicker">04 · 对话管理</div>
+  <h2>65 种事件类型，分布在 36 个命名空间</h2>
+  <div class="body dt">
+    <div class="diagram" data-mmd><script type="text/x-mermaid">
+xychart-beta horizontal
+  title "事件类型数 ≥ 2 的 16 个命名空间"
+  x-axis ["team", "tool-workflow", "tool", "compaction", "subagent", "session", "feedback", "approval", "turn", "step", "request", "llm", "job", "hook", "command", "assistant"]
+  y-axis "事件类型数" 0 --> 6
+  bar [5, 4, 4, 4, 3, 3, 3, 3, 2, 2, 2, 2, 2, 2, 2, 2]
+</script></div>
+    <div class="col">
+      <div class="callout"><b>其余 20 个命名空间各 1 种</b>，例如 <code>user/message</code>、<code>system/message</code>、<code>sandbox/mode</code>、<code>permission/*</code>、<code>todo/*</code>、<code>goal/*</code>、<code>plan/*</code>。</div>
+      <ul class="points sm">
+        <li><code>SessionEventMap</code> 通过 declaration merging 扩展：插件声明自己的事件类型，写进同一份日志</li>
+        <li>声明位置：<code>packages/core</code> 声明 18 种（其中 <code>dsh-session</code> 14 种），其余 47 种由其他包声明</li>
+        <li>生成的持久化目录记录每种事件的类型指纹</li>
+      </ul>
+    </div>
+  </div>
+  <div class="src">数据：<a href="../docs/persistence-catalog.md" target="_blank">docs/persistence-catalog.md</a> 中的 <code>event:</code> 条目，按 <code>/</code> 前的命名空间统计</div>
+</section>
+
+<section class="slide" data-title="Surface 与压缩" data-section="04 对话管理">
+  <div class="kicker">04 · 对话管理</div>
+  <h2>Surface：模型历史从日志派生，压缩不删历史</h2>
+  <div class="body" style="grid-template-rows:auto auto auto 1fr;gap:16px">
+    <div>
+      <div class="row-label">事件日志（只追加）</div>
+      <div class="tape lg">
+        <span class="ev k-surf"><i>#0</i>system</span>
+        <span class="ev k-surf shadow"><i>#1</i>user</span>
+        <span class="ev k-surf shadow"><i>#2</i>assistant</span>
+        <span class="ev k-surf shadow"><i>#3</i>tool/result</span>
+        <span class="ev k-surf"><i>#4</i>user</span>
+        <span class="ev k-surf"><i>#5</i>assistant</span>
+        <span class="ev k-plug"><i>#6</i>compaction/start</span>
+        <span class="ev k-plug"><i>#7</i>compaction/summary</span>
+        <span class="ev k-surf"><i>#8</i>user · 摘要 · replace #1..#3</span>
+        <span class="ev k-plug"><i>#9</i>compaction/end</span>
+      </div>
+    </div>
+    <div class="arrow-down">▼ deriveMessages()</div>
+    <div>
+      <div class="row-label">压缩后的 Surface（模型可见顺序）</div>
+      <div class="tape lg">
+        <span class="ev k-surf"><i>#0</i>system</span>
+        <span class="ev k-surf"><i>#8</i>摘要</span>
+        <span class="ev k-surf"><i>#4</i>user</span>
+        <span class="ev k-surf"><i>#5</i>assistant</span>
+      </div>
+    </div>
+    <div class="cols-3" style="display:grid;gap:20px;min-height:0">
+      <div class="card rich"><h3>SurfaceOp</h3>
+        <p><code>'append'</code> 追加到末尾；<code>{ op: 'replace', startSeq, endSeq }</code> 用本事件替换一段现有节点，两端都包含。</p>
+        <p class="more">上图 #8 即 <code>{ op: 'replace', startSeq: 1, endSeq: 3 }</code>。两端必须是当前 Surface 里的节点，<code>sourceEventSeqs</code> 要列出所有被遮住的节点。</p>
+      </div>
+      <div class="card rich"><h3>两种读法</h3>
+        <p>模型历史读 Surface，被替换的区间不可见；人看的记录读所有 append 事件，看到完整历史。</p>
+        <p class="more">压缩使用 replace，其他需要替换 Surface 的插件也可以使用；日志本身一行不删。</p>
+      </div>
+      <div class="card rich"><h3>投影缓存</h3>
+        <p>每个节点只投影一次并缓存；发生替换时重建；返回的消息深冻结，不能被改写。</p>
+      </div>
+    </div>
+  </div>
+  <div class="src">源码：<a href="../packages/core/session/src/types.ts" target="_blank">core/session/src/types.ts</a>（SurfaceOp）· <a href="../packages/core/session/src/index.ts" target="_blank">core/session/src/index.ts</a>（deriveMessages）· <a href="../docs/subsystems/session.md" target="_blank">session.md</a></div>
+</section>
+
+<section class="slide" data-title="Agent Loop" data-section="04 对话管理">
+  <div class="kicker">04 · 对话管理</div>
+  <h2>Agent Loop：一个 turn 怎么跑</h2>
+  <div class="body" style="grid-template-columns:1fr 1fr;grid-template-rows:auto 1fr auto;gap:12px 26px">
+    <div class="row-label" style="margin:0">外层：turn（followup 或 steer 唤醒 driver）</div>
+    <div class="row-label" style="margin:0">内层：一个 step = 一次模型请求 + 它调用的工具</div>
+    <div class="diagram" data-mmd><script type="text/x-mermaid">
+%%{init: {"flowchart": {"rankSpacing": 28, "nodeSpacing": 28}}}%%
+flowchart TD
+  ts["turn/start"] --> pre["preStep<br/>领取 inbox · 解析工具集<br/>组装 system prompt · agent/pre-step"]
+  pre -->|reject| blocked["turn/end<br/>blocked"]
+  pre -->|enter| step["执行一个 step<br/>见右图"]
+  step -->|还要请求模型| pre
+  step -->|本步自然结束| stopping["agent/turn-stopping"]
+  stopping -->|有新输入| pre
+  stopping -->|没有| te["turn/end<br/>completed 或 max-tokens"]
+  classDef bad fill:#FDEBEA,stroke:#CF4F45,color:#0F1115
+  classDef good fill:#E6F5EC,stroke:#2E9461,color:#0F1115
+  classDef hot fill:#4176E6,stroke:#283142,color:#ffffff
+  class blocked bad
+  class te good
+  class step hot
+</script></div>
+    <div class="diagram" data-mmd><script type="text/x-mermaid">
+%%{init: {"flowchart": {"rankSpacing": 26, "nodeSpacing": 28}}}%%
+flowchart TD
+  admit["step/start · 准备请求<br/>写入 system 更新 · 首次写入 user 消息"] --> stream["buildRequest 冻结请求<br/>流式请求模型"]
+  stream -->|失败| attempt["assistant/attempt<br/>agent/request-error"]
+  attempt -->|retry| admit
+  attempt -->|放弃| err["turn/end<br/>error"]
+  stream -->|成功| am["assistant/message"]
+  am -->|有 tool-call| tools["执行工具<br/>tool/call · tool/result"]
+  am -->|没有| se["step/end"]
+  tools --> se
+  classDef bad fill:#FDEBEA,stroke:#CF4F45,color:#0F1115
+  class err bad
+</script></div>
+    <div class="cols-3" style="display:grid;gap:18px;grid-column:1 / -1">
+      <div class="callout"><b>请求只由日志构建</b>：<code>deriveMessages()</code> + 最新 <code>request/header</code>，构造后冻结。</div>
+      <div class="callout"><b>流式</b>：实时帧给 UI；只持久化 <code>assistant/message</code> 或 <code>assistant/attempt</code>；取消时保留已流出的内容。</div>
+      <div class="callout"><b>失败</b>：<code>ToolCallRecovery</code> 补写缺失的 <code>tool/result</code>；工具附带的上下文进入 next-step inbox。</div>
+    </div>
+  </div>
+  <div class="src">源码：<a href="../packages/core/agent-loop/src/agent.ts" target="_blank">core/agent-loop/src/agent.ts</a>（turn、preStep、step、buildRequest）· <a href="../packages/core/session/src/repair.ts" target="_blank">core/session/src/repair.ts</a></div>
+</section>
+
+<section class="slide" data-title="一个 turn 的时序" data-section="04 对话管理">
+  <div class="kicker">04 · 对话管理</div>
+  <h2>一个 turn 的时序</h2>
+  <div class="body full">
+    <div class="diagram" data-mmd><script type="text/x-mermaid">
+sequenceDiagram
+  participant U as 用户
+  participant A as Agent
+  participant L as agent-loop
+  participant M as ctx.llm
+  participant T as ctx.tools
+  participant S as Session
+  U->>A: followup，唤醒 driver
+  A->>L: 开始 turn
+  L->>S: turn/start
+  L->>L: 组装提示词与工具 · agent/pre-step
+  L->>S: step/start · system · user · request/header
+  L->>M: 从日志派生的冻结请求
+  M-->>L: 流式块，转发给 UI
+  L->>S: assistant/message
+  L->>T: 执行 tool-call
+  T->>S: tool/call · tool/result
+  L->>S: step/end
+  L->>L: agent/turn-stopping
+  L->>S: turn/end
+</script></div>
+  </div>
+  <div class="src">参考：<a href="../docs/agent-lifecycle.md" target="_blank">docs/agent-lifecycle.md</a>（完整时序）· <a href="../docs/architecture.md" target="_blank">docs/architecture.md</a>（Turn flow）</div>
+</section>
+
+<section class="slide" data-title="Inbox 三种投递" data-section="04 对话管理">
+  <div class="kicker">04 · 对话管理</div>
+  <h2>Inbox：三种投递方式</h2>
+  <div class="body cols-2">
+    <div class="diagram" data-mmd><script type="text/x-mermaid">
+flowchart LR
+  F["followup(msg)<br/>用户发送新消息"] -->|唤醒| NT[("next-turn 队列")]
+  S["steer(msg)<br/>运行中插话"] -->|唤醒| NS[("next-step 队列")]
+  I["inject(msg)<br/>插件注入上下文"] -.->|不唤醒| NS
+  NT -->|"新 turn 开始时领取一条"| D["driver"]
+  NS -->|"每个 step 边界领取"| D
+  classDef hot fill:#4176E6,stroke:#283142,color:#ffffff
+  class D hot
+</script></div>
+    <div class="col">
+      <table class="tbl">
+        <tr><th>API</th><th>用途</th></tr>
+        <tr><td><code>followup</code></td><td>新 turn 里唯一的普通消息</td></tr>
+        <tr><td><code>steer</code></td><td>在最近的 step 边界被领取</td></tr>
+        <tr><td><code>inject</code></td><td>文件变更通知、子目录 AGENTS.md、skill 内容、定时提醒；空闲时等到被其他输入唤醒</td></tr>
+        <tr><td><code>send</code></td><td>以上三者的统一形式</td></tr>
+        <tr><td><code>cancel</code></td><td>中止当前活动；默认清空排队输入，第一个取消原因生效</td></tr>
+        <tr><td><code>whenIdle</code></td><td>等待整个 Agent 静止</td></tr>
+        <tr><td><code>runMaintenance</code></td><td>空闲期的非 turn 任务，例如 <code>/compact</code> 的手动压缩</td></tr>
+      </table>
+    </div>
+  </div>
+  <div class="src">源码：<a href="../packages/core/agent/src/runtime-types.ts" target="_blank">core/agent/src/runtime-types.ts</a>（Agent）· <a href="../packages/core/agent-loop/src/inbox.ts" target="_blank">core/agent-loop/src/inbox.ts</a></div>
+</section>
+
+<section class="slide" data-title="循环上的扩展点" data-section="04 对话管理">
+  <div class="kicker">04 · 对话管理</div>
+  <h2>新行为挂在事件上，不改循环代码</h2>
+  <div class="body" style="grid-template-rows:auto 1fr">
+    <div class="diagram" data-mmd style="height:auto;min-height:200px"><script type="text/x-mermaid">
+flowchart LR
+  s1["agent/pre-step<br/>waterfall"] --> s2["llm/stream<br/>waterfall"]
+  s2 --> s3["agent/request-error<br/>waterfall"]
+  s3 -.->|retry| s2
+  s2 --> s4["tools/pre-execute → tools/execute → tools/post-execute<br/>waterfall"]
+  s4 --> s5["agent/turn-stopping<br/>serial"]
+</script></div>
+    <table class="tbl">
+      <tr><th>事件</th><th>时机</th><th>本仓库中的使用者</th></tr>
+      <tr><td><code>agent/pre-step</code></td><td>每个 step 之前，可改写或拒绝</td><td>compaction-basic（上下文压力）、session-checkpoint-policy（落盘）</td></tr>
+      <tr><td><code>llm/stream</code></td><td>包裹模型流</td><td>session-checkpoint-policy（请求前落盘）</td></tr>
+      <tr><td><code>agent/request-error</code></td><td>模型请求失败后</td><td>llm-retry、compaction-basic（上下文溢出）、compaction-image-offload</td></tr>
+      <tr><td><code>tools/*</code></td><td>工具执行前、环绕、执行后</td><td>hook 桥接、timeout-policy、session-checkpoint-policy</td></tr>
+      <tr><td><code>agent/turn-stopping</code></td><td>turn 即将自然结束</td><td>Claude Code 与 Codex 的 hook 桥接、workspace-changes</td></tr>
+    </table>
+  </div>
+  <div class="src">源码：<a href="../packages/compaction/compaction-basic/src/index.ts" target="_blank">compaction-basic</a> · <a href="../packages/session/session-checkpoint-policy/src/index.ts" target="_blank">session-checkpoint-policy</a> · <a href="../packages/llm/llm-retry/src/index.ts" target="_blank">llm-retry</a> · <a href="../packages/guard/timeout-policy/src/index.ts" target="_blank">timeout-policy</a></div>
+</section>
+
+<section class="slide" data-title="上下文窗口管理" data-section="04 对话管理">
+  <div class="kicker">04 · 对话管理</div>
+  <h2>上下文窗口管理</h2>
+  <div class="body dt">
+    <div class="diagram" data-mmd><script type="text/x-mermaid">
+%%{init: {"flowchart": {"rankSpacing": 26, "nodeSpacing": 28}}}%%
+flowchart TD
+  tr1["agent/pre-step<br/>上下文压力"] --> q{"需要压缩?"}
+  tr2["agent/request-error<br/>上下文溢出"] --> q
+  q -->|是| st["compaction/start（加锁）"]
+  st --> pr["先裁剪过大的工具结果"]
+  pr --> sm["额外一次模型调用生成摘要<br/>compaction/summary"]
+  sm --> rp["user/message<br/>surfaceOp = replace"]
+  rp --> en["compaction/end（解锁）"]
+  en --> rt["替换生效才重试当前 step"]
+</script></div>
+    <div class="col">
+      <ul class="points sm">
+        <li>解锁事件写在最后：进程中途崩溃会留下没有配对的 <code>compaction/start</code>，可以被检测到</li>
+        <li>压缩后的下一次请求，把当前 system 指令合并回节点 0</li>
+        <li><code>tool-result-pruner</code>：超过 8192 字符的结果保留首 4096、尾 1024</li>
+        <li><code>image-offload</code>：超出图片预算时把最早的图片换成占位符后重试</li>
+        <li><code>spill-policy</code>：超大输出只保留首尾，并给出完整结果的文件路径</li>
+        <li>限制：无法缩减 system prompt、工具 schema 和会话前缀，也无法拆分单个超大的工具调用</li>
+      </ul>
+    </div>
+  </div>
+  <div class="src">源码：<a href="../packages/compaction/compaction-basic/README.md" target="_blank">compaction-basic</a> · <a href="../docs/subsystems/compaction.md" target="_blank">compaction.md</a> · <a href="../packages/spill/spill-policy/README.md" target="_blank">spill-policy</a></div>
+</section>
+
+<section class="slide" data-title="持久化与崩溃恢复" data-section="04 对话管理">
+  <div class="kicker">04 · 对话管理</div>
+  <h2>持久化与崩溃恢复</h2>
+  <div class="body dt">
+    <div class="diagram" data-mmd><script type="text/x-mermaid">
+flowchart TB
+  sess["Session（内存）<br/>append 同步校验"] --> store["ctx.sessions"]
+  cp["session-checkpoint-policy<br/>请求前 · 工具前 · 下一步前 flush"] -.-> store
+  store --> seam["ctx.sessionPersistence<br/>create · open · stat · list · export"]
+  seam --> h["SessionHandle<br/>read · append · flush · close"]
+  h --> f[("~/.dsh/sessions/<br/>session.vN.jsonl.zstd")]
+</script></div>
+    <div class="col">
+      <ul class="points sm">
+        <li><code>create</code> 时不写任何内容，首次 <code>append</code> 才落盘；每批写入都 <code>fsync</code></li>
+        <li>默认用带校验和的 Zstandard 帧；已提交的事件从不改写</li>
+        <li>checkpoint 落盘失败时，模型调用和工具都不会执行</li>
+        <li>崩溃后：最后一个 turn 原样保留，恢复时补写 <code>interrupted</code>；残缺的末行或末帧被丢弃</li>
+        <li>没有结果的工具调用得到“结果未知”，不自动重试有副作用的操作</li>
+      </ul>
+    </div>
+  </div>
+  <div class="src">源码：<a href="../packages/session/session-persistence-jsonl/README.md" target="_blank">session-persistence-jsonl</a> · <a href="../packages/session/session-checkpoint-policy/src/index.ts" target="_blank">session-checkpoint-policy</a> · <a href="../docs/subsystems/persistence.md" target="_blank">persistence.md</a></div>
+</section>
+
+<section class="slide" data-title="Fork 与子 Agent" data-section="04 对话管理">
+  <div class="kicker">04 · 对话管理</div>
+  <h2>Fork 与子 Agent</h2>
+  <div class="body dt">
+    <div class="diagram" data-mmd data-max="2.2"><script type="text/x-mermaid">
+%%{init: {"gitGraph": {"rotateCommitLabel": true}}}%%
+gitGraph
+  commit id: "turn 1"
+  commit id: "turn 2"
+  branch child
+  checkout child
+  commit id: "继承前缀"
+  commit id: "子 turn 1"
+  checkout parent
+  commit id: "turn 3"
+  commit id: "compaction"
+  checkout child
+  commit id: "子 turn 2"
+  checkout parent
+  commit id: "turn 4"
+</script></div>
+    <div class="col">
+      <ul class="points sm">
+        <li><b>Fork</b>：在 turn 边界分叉，子 Session 先保存父 Session 的前缀，再追加自己的事件；分叉点仍打开的 turn 以 <code>forked</code> 关闭</li>
+        <li><b>Resume</b>：<code>ctx.agents.resume()</code> 或 headless 的 <code>--session-id</code> 加载已存储的 Session</li>
+        <li><b>子 Agent</b>：进程内的 spawn 与 fork 保留持久的子 Session，可以继续对话；ACP、DSH SDK、Codex、Claude Code 等外部 provider 只执行一次</li>
+        <li>模型通过 <code>tool-subagent</code> 委派，通过 <code>tool-subagent-control</code> 管理身份、消息和等待</li>
+      </ul>
+    </div>
+  </div>
+  <div class="src">源码：<a href="../packages/core/session/src/index.ts" target="_blank">Session.fork()</a> · <a href="../packages/subagent/subagent/README.md" target="_blank">dsh-subagent</a> · <a href="../docs/subsystems/subagent.md" target="_blank">subagent.md</a></div>
+</section>
+
+<section class="slide" data-title="状态投影与 UI 跟随" data-section="04 对话管理">
+  <div class="kicker">04 · 对话管理</div>
+  <h2>状态投影与 UI 跟随</h2>
+  <div class="body dt">
+    <div class="diagram" data-mmd><script type="text/x-mermaid">
+flowchart TB
+  ev["已提交的 Session 事件"] --> pj["ctx.sessionProjections<br/>同步纯函数折叠"]
+  pj --> snap["snapshot()<br/>JSON + seq 切点"]
+  snap --> cli["客户端视图<br/>todos · goals · 权限"]
+  ev --> se["session/event"]
+  se --> hist["渲染与回放"]
+  live["agent/assistant-stream"] --> inc["增量显示文本"]
+</script></div>
+    <div class="col">
+      <ul class="points sm">
+        <li>投影注册：<code>register({ key, stateVersion, stateSchema, init, apply })</code></li>
+        <li>例如 sandbox-policy 用 <code>sandboxMode</code> 投影折叠 <code>sandbox/mode</code> 事件</li>
+        <li>快照标明它反映到哪个 seq，客户端可以把状态和对应的历史切点配对</li>
+        <li>实时帧只用于增量显示；回放只读持久事件，刷新或恢复后看到的内容与日志一致</li>
+      </ul>
+    </div>
+  </div>
+  <div class="src">源码：<a href="../packages/session/session-projection/README.md" target="_blank">session-projection</a> · <a href="../packages/sandbox/sandbox-policy/src/index.ts" target="_blank">sandbox-policy/src/index.ts</a></div>
+</section>
+
+<section class="slide divider" id="sec-design" data-title="05 设计巧思" data-section="05 设计巧思">
+  <div class="num">05</div>
+  <div class="kicker">Section 05</div>
+  <h2>设计巧思：值得借鉴的 17 个设计</h2>
+  <div class="q">这些选择让系统可替换、可重建、可审计。</div>
+  <div class="subs"><span>没有特权内核</span><span>模型可见即已记录</span><span>为 KV Cache 设计</span><span>能力接缝</span><span>fail-closed</span><span>类型与门禁</span><span>格式只增不改</span></div>
+</section>
+
+<section class="slide" data-title="17 个设计巧思一览" data-section="05 设计巧思">
+  <div class="kicker">05 · 设计巧思</div>
+  <h2>17 个设计巧思一览</h2>
+  <div class="body hl-grid">
+    <div class="hl"><span class="badge">1</span><b>没有特权内核</b><span>agent loop 也只是一个插件，可整体替换</span></div>
+    <div class="hl"><span class="badge">2</span><b>依赖驱动激活</b><span>inject + 依赖 epoch，替换服务自动级联重载</span></div>
+    <div class="hl"><span class="badge">3</span><b>注册即 effect</b><span>卸载、热重载、Agent 销毁时逆序撤销</span></div>
+    <div class="hl"><span class="badge">4</span><b>空根 + 补丁层</b><span>组合是数据；dump 标注每行来源</span></div>
+    <div class="hl"><span class="badge">5</span><b>模型可见即已记录</b><span>每个请求都能从日志逐字节重建</span></div>
+    <div class="hl"><span class="badge">6</span><b>为 KV Cache 设计</b><span>提示词变化以追加方式写入</span></div>
+    <div class="hl"><span class="badge">7</span><b>压缩不删历史</b><span>Surface 替换只遮住旧节点</span></div>
+    <div class="hl"><span class="badge">8</span><b>能力接缝</b><span>定义、实现、使用三角色；同一个执行世界</span></div>
+    <div class="hl"><span class="badge">9</span><b>waterfall + 单调守卫</b><span>策略可组合，不变量不可绕过</span></div>
+    <div class="hl"><span class="badge">10</span><b>处处 fail-closed</b><span>审批、沙箱、落盘失败一律拒绝</span></div>
+    <div class="hl"><span class="badge">11</span><b>显式优于隐式</b><span>resolve(request): Spec；配置错误加载时报错</span></div>
+    <div class="hl"><span class="badge">12</span><b>类型系统兜底</b><span>品牌 id、declaration merging、assertNever</span></div>
+    <div class="hl"><span class="badge">13</span><b>格式只增不改</b><span>版本化文件名，相邻迁移包</span></div>
+    <div class="hl"><span class="badge">14</span><b>规则写成门禁</b><span>52 个 verify-* 脚本，CI 强制执行</span></div>
+    <div class="hl"><span class="badge">15</span><b>浏览器同构</b><span>前端插件同样由 Cordis Loader 加载</span></div>
+    <div class="hl"><span class="badge">16</span><b>启动器细节</b><span>原子替换 profile、提前安装信号处理</span></div>
+    <div class="hl"><span class="badge">17</span><b>PTC</b><span>模型写代码调用工具，子调用走同一管线</span></div>
+  </div>
+  <div class="src">文字版：<a href="architecture.md" target="_blank">study_doc/architecture.md</a> 第 5 节</div>
+</section>
+
+<section class="slide" data-title="没有特权内核" data-section="05 设计巧思">
+  <div class="kicker">05 · 设计巧思</div>
+  <h2>没有特权内核：循环也只是一个插件</h2>
+  <div class="body cols-2">
+    <div class="diagram" data-mmd><script type="text/x-mermaid">
+flowchart LR
+  c1["session-checkpoint-policy<br/>llm/stream · tools/execute · pre-step"] --> loop
+  c2["compaction-basic<br/>pre-step · request-error"] --> loop
+  c3["llm-retry<br/>request-error"] --> loop
+  c4["timeout-policy<br/>tools/execute"] --> loop
+  loop["dsh-agent-loop"] -->|"setFactory(this)"| agents["ctx.agents<br/>dsh-agent"]
+  ext["扩展插件<br/>只依赖 dsh-agent"] --> agents
+  classDef hot fill:#4176E6,stroke:#283142,color:#ffffff
+  class loop hot
+</script></div>
+    <div class="diagram" data-mmd><script type="text/x-mermaid">
+%%{init: {"xyChart": {"width": 700, "height": 600}}}%%
+xychart-beta
+  title "packages/core 各包源码行数"
+  x-axis ["tools", "session", "agent-loop", "agent", "system-prompt", "scope"]
+  y-axis "行数" 0 --> 4000
+  bar [3798, 3771, 2051, 1802, 1131, 471]
+</script></div>
+  </div>
+  <div class="src">源码：<a href="../packages/core/agent-loop/src/index.ts" target="_blank">core/agent-loop/src/index.ts</a>（setFactory）· 行数统计：packages/core/&lt;pkg&gt;/src 下的 .ts 文件，含注释，排除 spec 与 test</div>
+</section>
+
+<section class="slide" data-title="模型可见即已记录" data-section="05 设计巧思">
+  <div class="kicker">05 · 设计巧思</div>
+  <h2>模型可见 ⟺ 已记录</h2>
+  <div class="body td">
+    <div class="col" style="justify-content:center">
+      <div class="big-quote">任何进入模型请求的内容，都必须能从 Session 日志及其引用的不可变附件中重建。<small>持有日志、附件和固定版本代码的人，可以逐字节重建每一次循环请求。新的模型可见输入必须对应一种新的 Session 事件。</small></div>
+    </div>
+    <div class="diagram" data-mmd><script type="text/x-mermaid">
+flowchart TB
+  log["Session 日志"] --> f["确定性投影<br/>deriveMessages() + request/header"]
+  att["不可变附件"] --> f
+  code["固定版本代码"] --> f
+  f --> req["逐字节相同的请求"]
+  req --> c1["前缀稳定<br/>利于缓存"]
+  req --> c2["逐字节<br/>审计与回放"]
+  req --> c3["resume 与 fork<br/>偏差可归因"]
+  classDef hot fill:#4176E6,stroke:#283142,color:#ffffff
+  class req hot
+</script></div>
+  </div>
+  <div class="src">决策记录：<a href="../.agents/notes/implemented/architecture/2026-07-05-reconstructable-requests.md" target="_blank">.agents/notes/implemented/architecture/2026-07-05-reconstructable-requests.md</a></div>
+</section>
+
+<section class="slide" data-title="为 KV Cache 设计" data-section="05 设计巧思">
+  <div class="kicker">05 · 设计巧思</div>
+  <h2>为 KV Cache 设计的提示词更新</h2>
+  <p class="lead">变化尽量追加在末尾，不改写开头；正常运行时只有压缩会让前缀失效。</p>
+  <div class="body" style="grid-template-rows:1fr auto">
+    <div class="kv" style="justify-content:center">
+      <div class="req"><b>请求 1</b><div class="segs"><span class="seg new">system</span><span class="seg new">user：任务</span><span class="seg new">运行时上下文</span></div></div>
+      <div class="req"><b>请求 2：工具调用后</b><div class="segs"><span class="seg hit">system</span><span class="seg hit">user：任务</span><span class="seg hit">运行时上下文</span><span class="seg new">assistant</span><span class="seg new">tool/result</span></div></div>
+      <div class="req"><b>请求 3：提示词与上下文变化</b><div class="segs"><span class="seg hit">system</span><span class="seg hit">user：任务</span><span class="seg hit">运行时上下文</span><span class="seg hit">assistant</span><span class="seg hit">tool/result</span><span class="seg new">system 增量（追加）</span><span class="seg new">新的上下文快照</span></div></div>
+      <div class="req"><b>请求 4：压缩之后</b><div class="segs"><span class="seg miss">system（合并到开头）</span><span class="seg miss">摘要</span><span class="seg miss">最近的消息</span></div></div>
+      <div class="legend" style="margin-left:266px"><span><i style="background:var(--green-50);border-color:#8FD1AC"></i>可复用的前缀</span><span><i style="background:var(--amber-50);border-color:#F2C27A"></i>新追加的内容</span><span><i style="background:var(--coral-50);border-color:#EFA59E"></i>前缀被改写，缓存失效</span></div>
+    </div>
+    <div class="cols-2" style="display:grid;gap:22px">
+      <div class="callout">提示词片段被注销时，追加一条“退役说明”而不是删掉原文，例如 bash 工具的 <code>retirement: 'The bash tool is no longer available. Its guidance no longer applies.'</code></div>
+      <div class="callout warn">能否真正复用前缀还取决于适配器的序列化方式：历史内 system 消息与 reminder 方式能保留前缀，合并成顶层 system 字段的方式会改变前缀。</div>
+    </div>
+  </div>
+  <div class="src">参考：<a href="../packages/core/agent-loop/README.md" target="_blank">agent-loop README</a> 与 <a href="../packages/core/system-prompt/README.md" target="_blank">system-prompt README</a> 的 Model Experience · KV Cache effect 小节（示意图）</div>
+</section>
+
+<section class="slide" data-title="能力接缝" data-section="05 设计巧思">
+  <div class="kicker">05 · 设计巧思</div>
+  <h2>能力接缝与“同一个执行世界”</h2>
+  <div class="body cols-2">
+    <div class="diagram" data-mmd><script type="text/x-mermaid">
+flowchart TB
+  def["Service Definition<br/>接口：ctx.fs"]
+  prov["Service Provider<br/>实现：fs-local · fs-sandbox · fs-ssh"]
+  con["Consumer<br/>使用方：tool-fs"]
+  prov -->|实现| def
+  con -->|使用| def
+  classDef hot fill:#4176E6,stroke:#283142,color:#ffffff
+  class def hot
+</script></div>
+    <div class="diagram" data-mmd><script type="text/x-mermaid">
+flowchart LR
+  subgraph local["本机执行世界"]
+    fs1["ctx.fs"]
+    sp1["ctx.subprocess"]
+  end
+  subgraph remote["远程执行世界（如 SSH）"]
+    fs2["ctx.fs"]
+    sp2["ctx.subprocess"]
+  end
+  bash["Bash"] --> sp1
+  pty["PTY 终端"] --> sp1
+  lsp["LSP"] --> sp1
+  bash -.->|"换 provider 后"| sp2
+  pty -.-> sp2
+  lsp -.-> sp2
+</script></div>
+  </div>
+  <div class="callout" style="margin-top:18px">一个接缝必须三个角色齐全，只实现其中一个不算接缝。文件系统和子进程 provider 共享同一个执行世界：把它们换成远程实现，Bash、PTY 和 LSP 会一起迁移过去。</div>
+  <div class="src">参考：<a href="../docs/capability-seams.md" target="_blank">docs/capability-seams.md</a> · <a href="../docs/architecture.md" target="_blank">docs/architecture.md</a>（Capability seams）</div>
+</section>
+
+<section class="slide" data-title="处处 fail-closed" data-section="05 设计巧思">
+  <div class="kicker">05 · 设计巧思</div>
+  <h2>处处 fail-closed：不确定就拒绝</h2>
+  <div class="body full">
+    <table class="tbl" style="font-size:22px;align-self:start">
+      <tr><th style="width:220px">位置</th><th>失败时的行为</th></tr>
+      <tr><td><b>审批</b></td><td>没有应答者、应答者抛错或返回不合规的值 → <code>unavailable</code>，按拒绝处理</td></tr>
+      <tr><td><b>沙箱</b></td><td>没有可用后端 → <code>SANDBOX_UNAVAILABLE</code>，绝不无沙箱执行</td></tr>
+      <tr><td><b>Checkpoint</b></td><td>落盘失败 → 不调用模型、不执行工具</td></tr>
+      <tr><td><b>启动</b></td><td>必需的行未激活 → <code>StartupError</code>，诊断列出缺少的服务</td></tr>
+      <tr><td><b>进程</b></td><td>未处理的 rejection 或异常 → 直接致命（fail-loud），先写诊断再退出</td></tr>
+      <tr><td><b>工具恢复</b></td><td>中断的工具调用 → 标记为“结果未知”，不自动重试有副作用的操作</td></tr>
+      <tr><td><b>遥测</b></td><td>开关变量的任何非空值（包括 <code>0</code>、<code>false</code>）→ 关闭遥测</td></tr>
+    </table>
+  </div>
+</section>
+
+<section class="slide" data-title="类型系统与可执行门禁" data-section="05 设计巧思">
+  <div class="kicker">05 · 设计巧思</div>
+  <h2>类型系统兜底，规则写成门禁</h2>
+  <div class="body cols-3" style="grid-template-rows:1fr 1fr">
+    <div class="card c-blue"><h3>品牌化 id</h3><p>跨边界的不透明 id 用 <code>Branded&lt;B&gt;</code>，例如 <code>SessionId</code>、<code>ApprovalRequestId</code>，不能互相混用。</p></div>
+    <div class="card c-teal"><h3>declaration merging</h3><p>事件表、<code>Context</code> 服务键、<code>SessionEventMap</code>、<code>TurnEndReasonMap</code> 都由插件按需扩展。</p></div>
+    <div class="card c-violet"><h3>穷尽检查</h3><p>封闭联合以 <code>assertNever</code> 收尾；CLI 的模式分派用 <code>satisfies never</code>；禁止新增 <code>as unknown</code>。</p></div>
+    <div class="card c-amber"><h3>52 个 verify-* 门禁</h3><p>应用入口、空 <code>catch</code>、导出 JSDoc、<code>cordis.yml</code> 依赖声明、客户端文案国际化……</p></div>
+    <div class="card c-coral"><h3>无 key 的快照测试</h3><p><code>pnpm run test:snapshot</code> 通过内置 profile 回放录制好的会话，不需要 API key。</p></div>
+    <div class="card c-green"><h3>覆盖率门禁</h3><p><code>pnpm run test:coverage</code> 要求 <code>packages/*/*/src</code> 逐文件 100% 覆盖。</p></div>
+  </div>
+  <div class="src">源码：<a href="../packages/util/brand/src/index.ts" target="_blank">util/brand/src/index.ts</a> · <a href="../scripts/verify-application-entrypoints.ts" target="_blank">scripts/verify-*.ts</a> · <a href="../docs/testing.md" target="_blank">docs/testing.md</a></div>
+</section>
+
+<section class="slide" data-title="持久化格式只增不改" data-section="05 设计巧思">
+  <div class="kicker">05 · 设计巧思</div>
+  <h2>持久化格式只增不改</h2>
+  <div class="body" style="grid-template-rows:auto 1fr">
+    <div class="diagram" data-mmd style="height:auto;min-height:170px"><script type="text/x-mermaid">
+flowchart LR
+  v0["session.jsonl.zstd<br/>v0"] -->|"v0-to-v1"| v1["session.v1.jsonl.zstd"]
+  v1 -->|"v1-to-v2"| v2["session.v2.jsonl.zstd"]
+  v2 -->|"v2-to-v3"| v3["session.v3.jsonl.zstd"]
+  v3 -->|"v3-to-v4"| v4["session.v4.jsonl.zstd<br/>当前写入版本"]
+  classDef hot fill:#4176E6,stroke:#283142,color:#ffffff
+  class v4 hot
+</script></div>
+    <div class="cols-3" style="display:grid;gap:22px;min-height:0">
+      <div class="card c-blue rich"><h3>相邻迁移包</h3>
+        <p>每个包只负责一步：<code>session-format-v0-to-v1</code> … <code>session-format-v3-to-v4</code>。写入版本由 <code>SESSION_FORMAT_VERSION</code> 决定（阅读时为 4）。</p>
+        <p class="more"><code>open()</code> 选择版本最高的规范代文件：当前版本走普通快速路径；历史版本解码、迁移到当前格式并校验。</p>
+      </div>
+      <div class="card c-teal rich"><h3>写开时发布后继文件</h3>
+        <p>以写方式打开旧会话时，在原文件旁发布当前版本命名的文件；已提交的旧文件从不重命名、覆盖或删除。</p>
+        <div class="flowmini"><span>同目录临时文件</span><i>→</i><span>Worker Thread 校验</span><i>→</i><span>复查源文件 revision</span><i>→</i><span>不覆盖地发布</span></div>
+        <p class="more">例：<code>session.v2.jsonl.zstd</code> 字节不变，旁边新增 <code>session.v4.jsonl.zstd</code>。准备之后源文件若有变化，这次写开被拒绝。</p>
+      </div>
+      <div class="card c-violet rich"><h3>读开只在内存迁移</h3>
+        <p>读开在内存里解码、迁移并校验一次，不发布后继文件。<code>stat</code> 和 <code>list</code> 只读最高代的文件头，不读事件行，也不启动迁移。</p>
+        <p class="more">保留旧文件不代表支持降级或回退读取，只保证已提交的数据不因升级而丢失。</p>
+      </div>
+    </div>
+  </div>
+  <div class="src">参考：<a href="../packages/session/session-persistence-jsonl/README.md" target="_blank">session-persistence-jsonl</a> · <a href="../packages/core/session/src/types.ts" target="_blank">SESSION_FORMAT_VERSION</a> · <a href="../.agents/notes/implemented/architecture/2026-08-31-released-session-format-migrations.md" target="_blank">格式迁移决策记录</a></div>
+</section>
+
+<section class="slide" data-title="推荐阅读路线" data-section="总结">
+  <div class="kicker">总结</div>
+  <h2>推荐阅读路线</h2>
+  <div class="body full">
+    <div class="diagram" data-mmd data-max="1.4"><script type="text/x-mermaid">
+timeline
+  section 入门
+    地图与框架 : architecture.md : cordis-primer.md
+  section 启动与组合
+    启动链 : bin.ts → profile-boot.ts → boot()
+    组合 : dsh-base 补丁 : composition.md
+  section 运行时
+    对话循环 : agent-lifecycle.md : agent.ts
+    会话与权限 : session.md : persistence.md : tool-execution-pipeline.md
+  section 设计理由
+    Agent Notes : 决策记录
+</script></div>
+  </div>
+</section>
+
+<section class="slide hero" data-title="谢谢" data-section="总结">
+  <div class="kicker">Thanks</div>
+  <h1>谢谢</h1>
+  <div class="sub">全是插件 · 组合即数据 · 日志为本 · 不确定就拒绝</div>
+  <div class="pills"><span>文字版：study_doc/architecture.md</span><span>官方地图：docs/architecture.md</span><span>Cordis：docs/cordis-primer.md</span></div>
+  <div class="meta">按 <kbd>T</kbd> 打开目录，回到任意一页</div>
+</section>
+
+
+</div></div>
+
+<div id="progress"></div>
+<div id="hud">
+  <div><span id="section-label"></span><span id="render-status"></span></div>
+  <div>
+    <button id="btn-prev" title="上一页（←）">‹</button>
+    <span id="counter"></span>
+    <button id="btn-next" title="下一页（→）">›</button>
+    <button id="btn-toc" title="目录（T）">☰</button>
+    <button id="btn-full" title="全屏（F）">⛶</button>
+    <button id="btn-help" title="帮助（?）">?</button>
+  </div>
+</div>
+<nav id="toc" aria-label="目录"></nav>
+<div id="help" role="dialog" aria-label="快捷键"><div class="box">
+  <h3>快捷键</h3>
+  <div><kbd>→</kbd> <kbd>Space</kbd> <kbd>PageDown</kbd> 下一页</div>
+  <div><kbd>←</kbd> <kbd>PageUp</kbd> 上一页</div>
+  <div><kbd>Home</kbd> / <kbd>End</kbd> 第一页 / 最后一页</div>
+  <div><kbd>T</kbd> 目录　<kbd>F</kbd> 全屏　<kbd>?</kbd> 帮助　<kbd>Esc</kbd> 关闭面板</div>
+  <div>地址栏 <code>#12</code> 直达第 12 页；打印前请等待所有图表渲染完成</div>
+</div></div>
+<div id="notice" hidden></div>
+
+<script>
+(() => {
+  'use strict'
+  const W = 1600
+  const H = 900
+  const FONT = '-apple-system, BlinkMacSystemFont, "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "Noto Sans CJK SC", "Segoe UI", Roboto, sans-serif'
+  const MERMAID_SOURCES = [
+    '../node_modules/mermaid/dist/mermaid.min.js',
+    'https://cdn.jsdelivr.net/npm/mermaid@11.17.2/dist/mermaid.min.js',
+  ]
+  const PALETTE = ['#4176E6', '#0E8C8C', '#6C55E0', '#C77D14', '#CF4F45', '#2E9461', '#4868B2', '#5B6B85', '#7AAAFF', '#B07CE8', '#E0A63B', '#8FA3BF']
+
+  const stage = document.getElementById('stage')
+  const slides = Array.from(stage.querySelectorAll('.slide'))
+  const total = slides.length
+  const counter = document.getElementById('counter')
+  const progress = document.getElementById('progress')
+  const sectionLabel = document.getElementById('section-label')
+  const renderStatus = document.getElementById('render-status')
+  const toc = document.getElementById('toc')
+  const help = document.getElementById('help')
+  const hud = document.getElementById('hud')
+  const notice = document.getElementById('notice')
+  let cur = 0
+
+  function fit() {
+    const scale = Math.min(window.innerWidth / W, window.innerHeight / H)
+    stage.style.transform = 'translate(-50%, -50%) scale(' + scale + ')'
+  }
+
+  const tocLinks = []
+  let lastSection = null
+  slides.forEach((slide, i) => {
+    const section = slide.dataset.section || ''
+    if (section !== lastSection) {
+      const heading = document.createElement('h4')
+      heading.textContent = section
+      toc.appendChild(heading)
+      lastSection = section
+    }
+    const link = document.createElement('a')
+    link.href = '#' + (i + 1)
+    const number = document.createElement('span')
+    number.className = 'n'
+    number.textContent = String(i + 1)
+    const title = document.createElement('span')
+    title.textContent = slide.dataset.title || ('第 ' + (i + 1) + ' 页')
+    link.append(number, title)
+    link.addEventListener('click', (event) => { event.preventDefault(); go(i); toggleToc(false) })
+    toc.appendChild(link)
+    tocLinks.push(link)
+  })
+
+  function go(index) {
+    const i = Math.max(0, Math.min(total - 1, index))
+    slides.forEach((slide, k) => {
+      slide.classList.toggle('active', k === i)
+      slide.classList.toggle('past', k < i)
+      slide.setAttribute('aria-hidden', k === i ? 'false' : 'true')
+    })
+    cur = i
+    counter.textContent = (i + 1) + ' / ' + total
+    progress.style.width = ((i + 1) / total * 100) + '%'
+    sectionLabel.textContent = slides[i].dataset.section || ''
+    tocLinks.forEach((link, k) => link.classList.toggle('cur', k === i))
+    const hash = '#' + (i + 1)
+    if (location.hash !== hash) history.replaceState(null, '', hash)
+    pump()
+  }
+
+  function indexFromHash() {
+    const value = decodeURIComponent(location.hash.slice(1))
+    if (value === '') return 0
+    if (/^\d+$/.test(value)) return Number(value) - 1
+    const found = slides.findIndex(slide => slide.id === value)
+    return found >= 0 ? found : cur
+  }
+
+  function toggleToc(force) {
+    const open = force === undefined ? !toc.classList.contains('open') : force
+    toc.classList.toggle('open', open)
+    if (open) tocLinks[cur].scrollIntoView({ block: 'center' })
+  }
+  function toggleHelp(force) {
+    help.classList.toggle('open', force === undefined ? !help.classList.contains('open') : force)
+  }
+  function toggleFullscreen() {
+    if (document.fullscreenElement) document.exitFullscreen()
+    else document.documentElement.requestFullscreen().catch(() => {})
+  }
+
+  document.addEventListener('keydown', (event) => {
+    if (event.altKey || event.ctrlKey || event.metaKey) return
+    const key = event.key
+    if (key === 'ArrowRight' || key === 'ArrowDown' || key === 'PageDown' || key === ' ' || key === 'Enter') { event.preventDefault(); go(cur + 1) }
+    else if (key === 'ArrowLeft' || key === 'ArrowUp' || key === 'PageUp' || key === 'Backspace') { event.preventDefault(); go(cur - 1) }
+    else if (key === 'Home') { event.preventDefault(); go(0) }
+    else if (key === 'End') { event.preventDefault(); go(total - 1) }
+    else if (key === 't' || key === 'T' || key === 'o' || key === 'O') toggleToc()
+    else if (key === 'f' || key === 'F') toggleFullscreen()
+    else if (key === '?' || key === 'h' || key === 'H') toggleHelp()
+    else if (key === 'Escape') { toggleToc(false); toggleHelp(false) }
+  })
+  window.addEventListener('hashchange', () => go(indexFromHash()))
+  window.addEventListener('resize', fit)
+  document.getElementById('btn-prev').addEventListener('click', () => go(cur - 1))
+  document.getElementById('btn-next').addEventListener('click', () => go(cur + 1))
+  document.getElementById('btn-toc').addEventListener('click', () => toggleToc())
+  document.getElementById('btn-full').addEventListener('click', toggleFullscreen)
+  document.getElementById('btn-help').addEventListener('click', () => toggleHelp())
+  help.addEventListener('click', (event) => { if (event.target === help) toggleHelp(false) })
+
+  let touchX = null
+  stage.addEventListener('touchstart', (event) => { touchX = event.touches[0].clientX }, { passive: true })
+  stage.addEventListener('touchend', (event) => {
+    if (touchX === null) return
+    const dx = event.changedTouches[0].clientX - touchX
+    if (Math.abs(dx) > 50) go(cur + (dx < 0 ? 1 : -1))
+    touchX = null
+  })
+
+  let idleTimer = 0
+  function wake() {
+    hud.classList.remove('idle')
+    clearTimeout(idleTimer)
+    idleTimer = setTimeout(() => hud.classList.add('idle'), 2500)
+  }
+  document.addEventListener('mousemove', wake)
+
+  // Mermaid: each diagram renders through mermaid.render(), whose temporary node lives
+  // outside the scaled stage, so label measurement is not distorted by the stage transform.
+  const boxes = Array.from(stage.querySelectorAll('.diagram[data-mmd]'))
+  const pending = new Set(boxes)
+  let mermaidReady = null
+  let working = false
+  let done = 0
+  let renderId = 0
+
+  function loadScript(src) {
+    return new Promise((resolve, reject) => {
+      const script = document.createElement('script')
+      script.src = src
+      script.onload = resolve
+      script.onerror = reject
+      document.head.appendChild(script)
+    })
+  }
+
+  async function ensureMermaid() {
+    for (const src of MERMAID_SOURCES) {
+      if (window.mermaid) break
+      try { await loadScript(src) } catch (error) { console.warn('mermaid not loaded from', src, error) }
+    }
+    if (!window.mermaid) return false
+    const themeVariables = {
+      fontFamily: FONT, fontSize: '18px', background: '#FFFFFF',
+      primaryColor: '#EDF3FE', primaryBorderColor: '#4176E6', primaryTextColor: '#0F1115',
+      secondaryColor: '#E3F5F4', secondaryBorderColor: '#0E8C8C', secondaryTextColor: '#0F1115',
+      tertiaryColor: '#FFFFFF', tertiaryBorderColor: '#B7C8FE', tertiaryTextColor: '#0F1115',
+      mainBkg: '#EDF3FE', nodeBorder: '#4176E6', lineColor: '#5B6475', textColor: '#0F1115',
+      clusterBkg: '#F7F9FD', clusterBorder: '#B7C8FE', titleColor: '#283142', edgeLabelBackground: '#FFFFFF',
+      noteBkgColor: '#FFF4E0', noteBorderColor: '#E0A63B', noteTextColor: '#34415B',
+      actorBkg: '#EDF3FE', actorBorder: '#4176E6', actorTextColor: '#0F1115', actorLineColor: '#B7C8FE',
+      signalColor: '#34415B', signalTextColor: '#0F1115', labelBoxBkgColor: '#EDF3FE', labelBoxBorderColor: '#4176E6',
+      labelTextColor: '#0F1115', loopTextColor: '#34415B', activationBkgColor: '#D3E2FF', activationBorderColor: '#4176E6',
+      pieTitleTextSize: '24px', pieSectionTextSize: '17px', pieSectionTextColor: '#FFFFFF', pieLegendTextSize: '18px',
+      pieStrokeColor: '#FFFFFF', pieStrokeWidth: '2px', pieOuterStrokeWidth: '0px', pieOpacity: '1',
+      quadrant1Fill: '#EDF3FE', quadrant2Fill: '#E3F5F4', quadrant3Fill: '#FDEBEA', quadrant4Fill: '#FFF4E0',
+      quadrant1TextFill: '#34415B', quadrant2TextFill: '#34415B', quadrant3TextFill: '#34415B', quadrant4TextFill: '#34415B',
+      quadrantPointFill: '#4176E6', quadrantPointTextFill: '#0F1115', quadrantXAxisTextFill: '#34415B', quadrantYAxisTextFill: '#34415B',
+      quadrantTitleFill: '#0F1115', quadrantInternalBorderStrokeFill: '#B7C8FE', quadrantExternalBorderStrokeFill: '#B7C8FE',
+      commitLabelColor: '#0F1115', commitLabelBackground: '#EDF3FE', commitLabelFontSize: '15px',
+      xyChart: {
+        backgroundColor: '#FFFFFF', titleColor: '#0F1115', plotColorPalette: '#4176E6',
+        xAxisLabelColor: '#34415B', xAxisTitleColor: '#34415B', xAxisTickColor: '#B7C8FE', xAxisLineColor: '#B7C8FE',
+        yAxisLabelColor: '#34415B', yAxisTitleColor: '#34415B', yAxisTickColor: '#B7C8FE', yAxisLineColor: '#B7C8FE',
+      },
+    }
+    PALETTE.forEach((color, i) => {
+      themeVariables['pie' + (i + 1)] = color
+      themeVariables['cScale' + i] = color
+      themeVariables['cScaleLabel' + i] = '#FFFFFF'
+      if (i < 8) { themeVariables['git' + i] = color; themeVariables['gitBranchLabel' + i] = '#FFFFFF' }
+    })
+    window.mermaid.initialize({
+      startOnLoad: false,
+      securityLevel: 'strict',
+      theme: 'base',
+      fontFamily: FONT,
+      themeVariables,
+      flowchart: { curve: 'basis', htmlLabels: true, padding: 12, nodeSpacing: 30, rankSpacing: 36, wrappingWidth: 560, useMaxWidth: false },
+      sequence: { useMaxWidth: false, mirrorActors: false, actorMargin: 36, boxMargin: 8, messageMargin: 26, actorFontSize: 18, messageFontSize: 17, noteFontSize: 16 },
+      state: { useMaxWidth: false },
+      pie: { useMaxWidth: false, textPosition: 0.72 },
+      xyChart: { useMaxWidth: false, width: 980, height: 560, titleFontSize: 22, showDataLabel: true, showDataLabelOutsideBar: true, xAxis: { labelFontSize: 17 }, yAxis: { labelFontSize: 16 } },
+      quadrantChart: { useMaxWidth: false, chartWidth: 620, chartHeight: 620, titleFontSize: 22, quadrantLabelFontSize: 18, pointLabelFontSize: 17, xAxisLabelFontSize: 17, yAxisLabelFontSize: 17 },
+      mindmap: { useMaxWidth: false, padding: 14, maxNodeWidth: 380 },
+      timeline: { useMaxWidth: false, padding: 12 },
+      gitGraph: { useMaxWidth: false, mainBranchName: 'parent', showCommitLabel: true, rotateCommitLabel: false },
+    })
+    return true
+  }
+
+  function fitSvg(box) {
+    const svg = box.querySelector('svg')
+    if (!svg) return
+    const viewBox = svg.viewBox && svg.viewBox.baseVal
+    let vw = viewBox ? viewBox.width : 0
+    let vh = viewBox ? viewBox.height : 0
+    if (!vw || !vh) { const bbox = svg.getBBox(); vw = bbox.width; vh = bbox.height }
+    const style = getComputedStyle(box)
+    const cw = box.clientWidth - parseFloat(style.paddingLeft) - parseFloat(style.paddingRight)
+    const ch = box.clientHeight - parseFloat(style.paddingTop) - parseFloat(style.paddingBottom)
+    const maxScale = parseFloat(box.dataset.max || '1.6')
+    const scale = Math.min(cw / vw, ch / vh, maxScale)
+    svg.removeAttribute('style')
+    svg.setAttribute('width', String(Math.floor(vw * scale)))
+    svg.setAttribute('height', String(Math.floor(vh * scale)))
+  }
+
+  function nextBox() {
+    for (let d = 0; d < total; d++) {
+      for (const k of [cur + d, cur - d]) {
+        if (k < 0 || k >= total) continue
+        for (const box of slides[k].querySelectorAll('.diagram[data-mmd]')) if (pending.has(box)) return box
+      }
+    }
+    return pending.values().next().value
+  }
+
+  async function renderBox(box) {
+    const source = box.querySelector('script[type="text/x-mermaid"]')
+    try {
+      const { svg } = await window.mermaid.render('mmd-' + (++renderId), source.textContent.trim())
+      box.innerHTML = svg
+      fitSvg(box)
+      box.dataset.state = 'done'
+    } catch (error) {
+      box.dataset.state = 'error'
+      const message = document.createElement('div')
+      message.className = 'err'
+      message.textContent = '图表渲染失败：' + (error && error.message ? error.message : String(error))
+      box.replaceChildren(message)
+      console.error('diagram failed', error)
+    }
+    done++
+    renderStatus.textContent = done < boxes.length ? '　图表 ' + done + ' / ' + boxes.length : ''
+  }
+
+  async function pump() {
+    if (working || pending.size === 0) return
+    working = true
+    try {
+      if (!(await (mermaidReady ??= document.fonts.ready.then(ensureMermaid)))) {
+        notice.hidden = false
+        notice.textContent = '未能加载 mermaid，图表无法渲染：请在仓库根目录运行 pnpm install，或联网后刷新。'
+        for (const box of pending) {
+          box.dataset.state = 'error'
+          const message = document.createElement('div')
+          message.className = 'err'
+          message.textContent = '图表未渲染（缺少 mermaid）'
+          box.replaceChildren(message)
+        }
+        pending.clear()
+        return
+      }
+      while (pending.size > 0) {
+        const box = nextBox()
+        pending.delete(box)
+        await renderBox(box)
+      }
+    } finally {
+      working = false
+    }
+  }
+
+  fit()
+  wake()
+  go(indexFromHash())
+})()
+</script>
+</body>
+</html>
